@@ -16,7 +16,7 @@
 
 1. **Hardware:** Stay on the two iPhones. Spend ~**$300–$430** of the $500 on **2–3 tripods + phone mounts, a printed ChArUco calibration board, and good lighting**, and *optionally* a **third used/cheap camera** to break the 2‑camera accuracy ceiling. **No LiDAR exists on either phone** (LiDAR is Pro‑only), so the architecture is **calibrated multi‑view RGB + strong 2D pose + triangulation**, not depth sensing. ([iPhone 16e has no LiDAR](https://www.apple.com/newsroom/2025/02/apple-debuts-iphone-16e-a-powerful-new-member-of-the-iphone-16-family/))
 2. **Software stack (all commercial‑safe licenses):** iPhone capture → **RTMPose** (Apache‑2.0) 2D pose → **Pose2Sim** (BSD‑3) calibration + robust triangulation → **OpenSim / Moco** (Apache‑2.0) inverse kinematics + dynamics → **GRF‑from‑kinematics** model for force‑plate‑free kinetics → our **own reporting layer**. **Avoid OpenPose** ($25k/yr commercial license, *excludes sports*) and **Ultralytics YOLO** (AGPL/paid). This is the single most important strategic choice for a commercial future.
-3. **How we beat OpenCap:** more cameras (3–4 vs 2), a **better/commercial‑safe pose model** (RTMPose vs OpenCap's OpenPose), **fully local on Apple Silicon** (no Stanford cloud dependency), **higher‑frame‑rate capture** (120/240 fps), and — the real differentiator — a **clinical reporting + normative‑comparison + asymmetry layer** that OpenCap simply does not have.
+3. **How we beat OpenCap:** a **1‑phone "quick mode"** OpenCap can't do (it needs ≥2 phones — see 2.3b) *plus* a multi‑camera "accurate mode"; more cameras (3–4 vs 2), a **better/commercial‑safe pose model** (RTMPose vs OpenCap's OpenPose), **fully local on Apple Silicon** (no Stanford cloud dependency), **higher‑frame‑rate capture** (120/240 fps), and — the real differentiator — a **clinical reporting + normative‑comparison + asymmetry layer** that OpenCap simply does not have.
 4. **Accuracy we can credibly target:** **~3–5° MAE** sagittal‑plane joint kinematics vs marker‑based (OpenCap is 4.5° mean; Pose2Sim 3.0° walking). Be honest that **transverse‑plane rotation is hard for *everyone*** (often >5°, even marker‑based) and that **muscle *strength/structure* cannot be inferred from gait** — only *relative model‑estimated loading patterns*.
 5. **Roadmap:** MVP (single‑subject, 2–3 phones, spatiotemporal + sagittal kinematics) → validation study (concurrent validity vs a reference) → commercial‑ready (multi‑subject, kinetics, polished report).
 
@@ -227,12 +227,39 @@ Key facts that shape our targets:
 
 | OpenCap weakness | Our improvement | Expected effect |
 |---|---|---|
+| **Requires ≥2 phones** — no single‑camera option at all | **1‑phone "quick mode"** (monocular SMPL → OpenSim) *plus* multi‑cam "accurate mode" (see 2.3b) | The record‑one‑phone‑get‑a‑3D‑model experience OpenCap lacks, with an honest fidelity tier |
 | **2‑camera default**, accuracy ceiling, worst‑case DOFs ~10° | **3–4 calibrated cameras**, RANSAC triangulation | Lower per‑DOF variance, better frontal/transverse, robustness to occlusion |
 | **OpenPose dependency** (academic/$25k‑sports‑excluded; older 61.8 AP) | **RTMPose** (Apache, 75.8 AP, faster) | Better keypoints, commercial‑safe, faster |
 | **Cloud dependency** (Stanford servers, academic‑use ToS) | **Fully local on Apple Silicon** | Privacy, no per‑use cost, no ToS limit, offline |
 | **Standard 60 fps capture** | **120/240 fps** for running/fast events | Cleaner event detection, sport use cases |
 | **Validated only on healthy + few tasks; degrades on sport** | **Task‑specific models + our own validation study** | Defensible accuracy claims per use case |
 | **No clinical report** — outputs are raw kinematics/`.osim` | **Full normative‑comparison reporting + asymmetry indices + fall‑risk + neuro markers** | **The actual product.** OpenCap stops where we start. |
+
+## 2.3b Single‑camera (1‑phone) mode — feasibility, accuracy, and design
+
+> **Myth‑buster first:** OpenCap is **not** a single‑phone system. It requires a **minimum of two iPhones** — Stanford's own headline is *"movement analysis is now **two** smartphones away."* They use multi‑view triangulation precisely **because single‑view 3D is less accurate**, and because they wanted defensible **kinetics**. The 3D model you see in OpenCap is a *two‑camera* result. ([Stanford HPA](https://humanperformance.stanford.edu/news/human-movement-analysis-is-now-two-smartphones-away-with-opencap-software/), [OpenCap paper](https://mobl.mech.utah.edu/wp-content/uploads/2023/12/opencap.pdf))
+
+**So can we do 3D from one phone? Yes — and OpenCap can't, which is our opening.** It's a different technique: instead of triangulating two views, a single view uses a **monocular 3D human‑mesh model** (SMPL‑family: e.g., CameraHMR/HybrIK/4D‑Humans) to *infer* a full 3D body, which then drives **OpenSim inverse kinematics** end‑to‑end. The cost is accuracy.
+
+**What the literature says single‑camera 3D gait actually delivers:**
+
+| Approach | Accuracy (vs marker‑based / OpenCap) | Notes |
+|---|---|---|
+| **Monocular SMPL → OpenSim IK** ("calibrationless monocular musculoskeletal simulation during gait") | **best mean 8.5° MAE across joints, range 3.7–21.6°**, from a **45° side view**; validated on 19 subjects + 4 gait patterns vs OpenCap + marker‑based | Frontal/transverse planes are unreliable; "IK cannot fully compensate" for single‑camera limits ([ScienceDirect](https://www.sciencedirect.com/science/article/pii/S240584402408109X), [PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC11168395/)) |
+| **Monocular 3D pose lifting** (MotionBERT etc.) | ~39 mm MPJPE on Human3.6M *lab benchmark* | Lab number, not clinical joint‑angle error; scale/depth ambiguous ([MotionBERT class](https://arxiv.org/pdf/2310.16288)) |
+| **Sports2D** (single camera, **2D only**) | sagittal/frontal angles; subject must move **parallel** to the camera plane | True 2D — great for quick sagittal gait, **not** 3D ([Sports2D](https://github.com/davidpagnon/Sports2D)) |
+| **MonoMSK** (2025, frontier) | monocular 3D *musculoskeletal dynamics* | Research‑grade, worth tracking ([arXiv](https://arxiv.org/html/2511.19326v1)) |
+
+**The honest tradeoff:** single‑camera 3D gait lands around **~8.5° average error (up to ~21° in some DOFs)** — roughly **2× worse than our 2‑camera target (~4.5°)** and with **unreliable frontal/transverse planes** (so left/right asymmetry, the thing we care about most for injury/neuro, is the *first* casualty). Kinetics from one camera are weaker still.
+
+**The design decision — ship BOTH, because we own two phones:**
+
+| Mode | Cameras | Pipeline | Accuracy | Use it for |
+|---|---|---|---|---|
+| **Quick mode** | **1 phone** | iPhone → RTMPose + **monocular SMPL (CameraHMR‑class)** → OpenSim IK → report | ~8.5° MAE; sagittal OK, frontal weak | Screening, field/home capture, demos, the "record‑and‑get‑a‑model" wow factor, longitudinal self‑tracking |
+| **Accurate mode** | **2–4 phones** | iPhone → RTMPose → **Pose2Sim triangulation** → OpenSim → kinetics | ~3–5° MAE; matches/beats OpenCap | Research‑grade kinematics, asymmetry indices, kinetics, any defensible claim |
+
+This is strictly **better than OpenCap**: we offer the **1‑phone end‑to‑end experience OpenCap doesn't have** *and* a 2+‑phone mode that equals it — same app, same report, user picks the fidelity tier. The report clearly labels which mode produced it and **suppresses frontal‑plane/asymmetry metrics in quick mode** (or flags them low‑confidence) so we never over‑claim.
 
 ## 2.4 The reporting layer (the "full report" we want)
 
@@ -278,7 +305,10 @@ This is where the IP and differentiation live. The report computes, per session,
 
 **Phase 0 — Environment (week 1, $0).** Set up Mac: Python env, `rtmlib`/RTMPose, OpenCV, Pose2Sim, OpenSim (native arm64 if available, else Rosetta x86_64 conda). Smoke‑test RTMPose on a single iPhone clip.
 
-**Phase 1 — MVP (weeks 2–5, $0–$150).** 2 phones + 2 tripods. ChArUco calibration → RTMPose → Pose2Sim triangulation → OpenSim IK. **Output: spatiotemporal params + sagittal hip/knee/ankle angles** for one subject (a team member). Compare step length against tape‑measured ground truth. *Target: spatiotemporal within ~5% of tape, sagittal angles visually sane.*
+**Phase 1 — MVP (weeks 2–5, $0–$150).** Build **both capture modes from day one** since they share everything downstream of pose:
+- *Quick mode (1 phone):* iPhone clip → RTMPose → monocular SMPL (CameraHMR‑class) → OpenSim IK → sagittal report. This delivers the "record on one phone, get a 3D model + analysis" experience first — the fastest path to a demo.
+- *Accurate mode (2 phones + 2 tripods):* ChArUco calibration → RTMPose → Pose2Sim triangulation → OpenSim IK.
+**Output: spatiotemporal params + sagittal hip/knee/ankle angles** for one subject (a team member). Compare step length against tape‑measured ground truth, and quick‑mode vs accurate‑mode against each other. *Target: spatiotemporal within ~5% of tape; accurate‑mode sagittal angles ≤5°; quick‑mode sagittal ~8° with frontal flagged low‑confidence.*
 
 **Phase 2 — Reporting + norms (weeks 6–9, $0).** Build the reporting layer: normative comparison (Fukuchi/Schreiber), asymmetry indices (SI/SR/GDI/GPS), fall‑risk & ROM panels, PDF/HTML report generator. Add 3rd/4th camera (+$0–$240) to improve frontal/transverse.
 
