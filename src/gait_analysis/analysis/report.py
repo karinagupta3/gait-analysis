@@ -47,13 +47,95 @@ def _base(name: str) -> str:
     return name
 
 
-def _plot_b64(time, coords) -> str:
-    """One clean panel per coordinate (real .mot data vs time, R/L overlaid)."""
+# Which coordinates matter clinically for each action (what to chart).
+TASK_COORDS = {
+    "squat": ["pelvis_tilt", "hip_flexion", "knee_angle", "ankle_angle", "hip_adduction"],
+    "gait":  ["pelvis_tilt", "pelvis_list", "hip_flexion", "hip_adduction", "knee_angle", "ankle_angle"],
+    "sts":   ["pelvis_tilt", "hip_flexion", "knee_angle", "ankle_angle"],
+}
+
+TASK_TITLE = {"squat": "Squat", "gait": "Walking / gait", "sts": "Sit-to-stand"}
+
+
+def _fmt(v, unit="deg"):
+    return f"{v:.1f} {unit}" if isinstance(v, (int, float)) and v == v else "n/a"
+
+
+def _table(rows: list[tuple[str, str, str]]) -> str:
+    body = "".join(f"<tr><td>{html.escape(a)}</td><td>{html.escape(str(b))}</td>"
+                   f"<td class='ref'>{html.escape(c)}</td></tr>" for a, b, c in rows)
+    return ("<table><thead><tr><th>metric</th><th>value</th><th>clinical reference</th>"
+            f"</tr></thead><tbody>{body}</tbody></table>")
+
+
+def _squat_panel(m: dict) -> str:
+    if not m or m.get("n_reps", 0) == 0:
+        return "<p class='meta'>No squat reps detected.</p>"
+    kr, kl = m.get("peak_knee_flexion_r"), m.get("peak_knee_flexion_l")
+    rows = [
+        ("Reps analyzed", m.get("n_reps", "n/a"), ""),
+        ("Squat depth — peak knee flexion (R / L)", f"{_fmt(kr)} / {_fmt(kl)}",
+         ">=90 parallel, >=100 deep"),
+        ("Peak hip flexion (R / L)",
+         f"{_fmt(m.get('peak_hip_flexion_r'))} / {_fmt(m.get('peak_hip_flexion_l'))}",
+         "~95 needed for a deep squat"),
+        ("Dynamic valgus — peak hip adduction (R / L)",
+         f"{_fmt(m.get('peak_hip_adduction_r'))} / {_fmt(m.get('peak_hip_adduction_l'))}",
+         ">~10 = medial collapse (ACL/PFP link)"),
+        ("Ankle dorsiflexion (R / L)",
+         f"{_fmt(m.get('peak_ankle_df_r'))} / {_fmt(m.get('peak_ankle_df_l'))}",
+         "limited DF caps depth / drives butt wink"),
+        ("Butt wink — posterior pelvic-tilt reversal",
+         _fmt(m.get("butt_wink_posterior_excursion")), ">~8 = butt wink (load-dependent risk)"),
+    ]
+    if kr and kl:
+        rows.append(("L / R depth asymmetry",
+                     f"{abs(kr - kl) / (0.5 * (kr + kl)) * 100:.0f} %", "<15% (borrowed cut-point)"))
+    return _table(rows)
+
+
+def _sts_panel(m: dict) -> str:
+    if not m or m.get("n_rises", 0) == 0:
+        return "<p class='meta'>No sit-to-stand rises detected.</p>"
+    rows = [
+        ("Rises analyzed", m.get("n_rises", "n/a"), ""),
+        ("Mean rise time", _fmt(m.get("mean_rise_time_s"), "s"), ""),
+    ]
+    if m.get("n_rises", 0) >= 5:
+        rows.append(("5x sit-to-stand time", _fmt(m.get("total_time_s"), "s"),
+                     "60s ~11.4, 70s ~12.6, 80s ~14.8; >12 assess, >15 fall risk"))
+    return _table(rows)
+
+
+def _gait_panel(phase, summary) -> str:
+    n = phase.n_cycles
+    dur = summary["duration_s"]
+    cad = (n * 2) / dur * 60 if (dur > 0 and n) else None   # 2 steps per cycle
+    rows = [
+        ("Gait cycles analyzed", n, ""),
+        ("Cadence (estimated)", _fmt(cad, "steps/min") if cad else "n/a", "~100-120"),
+        ("Stride/step length, double-support, step width", "needs the marker .trc",
+         "spatiotemporal from foot markers (Track A) -- coming"),
+    ]
+    return _table(rows)
+
+
+def _task_panel(task: str, metrics: dict, phase, summary) -> str:
+    if task == "squat":
+        return _squat_panel(metrics)
+    if task == "sts":
+        return _sts_panel(metrics)
+    return _gait_panel(phase, summary)
+
+
+def _plot_b64(time, coords, names=None) -> str:
+    """One clean panel per clinically-relevant coordinate (real .mot data vs time)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    bases = [b for b in KEY_COORDS
+    want = names or KEY_COORDS
+    bases = [b for b in want
              if b in coords or f"{b}_r" in coords or f"{b}_l" in coords]
     if not bases:                                   # fall back to whatever exists
         bases = sorted({_base(c) for c in coords})[:8]
@@ -130,7 +212,8 @@ def build_html_report(mot_path, out_html, gait_speed_m_s=None,
     summary = kinematics.summarize(time, coords, meta)
     phase = gait_cycle.compute_phase_features(time, coords)
     ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s, phase=phase)
-    task, findings, _metrics = tasks.route(time, coords, summary, ctx)
+    task, findings, metrics = tasks.route(time, coords, summary, ctx)
+    task_name = TASK_TITLE.get(task, task)
 
     n = phase.n_cycles
     conf = ("GOOD" if n >= 3 else "LOW -- short trial, interpret cautiously" if n >= 1
@@ -162,13 +245,17 @@ Generated {(_dt.date.today().isoformat())} &middot; angles in {'deg' if summary[
 &nbsp;|&nbsp; frames: {summary['n_frames']} ({summary['duration_s']:.1f}s)
 &nbsp;|&nbsp; gait speed: {speed} &nbsp;|&nbsp; coordinates: {summary['n_coordinates']}</div>
 
+<h2>Key metrics &mdash; {html.escape(task_name)}</h2>
+<p class="meta">The measures that matter clinically for this action.</p>
+{_task_panel(task, metrics, phase, summary)}
+
 <h2>Clinical signature flags</h2>
 <p class="meta">Research decision-support, <b>not a diagnosis</b>. Each flag lists multiple
 plausible causes and the confirming clinical test.</p>
 {_flag_cards(findings)}
 
-<h2>Joint-angle curves (R vs L)</h2>
-<img src="data:image/png;base64,{_plot_b64(time, coords)}" alt="joint angle curves"/>
+<h2>Joint-angle curves ({html.escape(task_name)}-relevant, R vs L)</h2>
+<img src="data:image/png;base64,{_plot_b64(time, coords, TASK_COORDS.get(task))}" alt="joint angle curves"/>
 
 <h2>Range of motion vs normative reference</h2>
 {_rom_table(summary)}

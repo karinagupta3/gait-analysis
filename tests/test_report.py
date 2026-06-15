@@ -29,6 +29,7 @@ def test_build_html_report(tmp_path):
     out = build_html_report(mot, tmp_path / "report.html", gait_speed_m_s=1.2, subject="Demo")
     assert out.exists()
     text = out.read_text()
+    assert "Key metrics" in text                     # task-specific metrics panel
     assert "Clinical signature flags" in text
     assert "Joint-angle curves" in text
     assert "Range of motion" in text
