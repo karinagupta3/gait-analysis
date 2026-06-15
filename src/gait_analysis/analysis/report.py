@@ -16,7 +16,7 @@ import html
 import io
 from pathlib import Path
 
-from . import gait_cycle, interpretation, kinematics, signatures, tasks
+from . import gait_cycle, interpretation, kinematics, normative, signatures, tasks
 
 # Normative sagittal references (Perry & Burnfield / AAPM&R; see docs/04 Section A).
 # Keyed by coordinate base (strip _r/_l/_beta). Display-only reference strings.
@@ -120,12 +120,72 @@ def _gait_panel(phase, summary) -> str:
     return _table(rows)
 
 
+def _curve_section(task: str, task_name: str, time, coords) -> str:
+    """Gait -> ensemble % gait-cycle plot with normal band; else task-relevant time series."""
+    if task == "gait":
+        b64 = _gait_cycle_plot_b64(time, coords)
+        if b64:
+            return (f"<h2>Gait-cycle kinematics (ensemble mean &plusmn; 1SD across strides)</h2>"
+                    f"<p class='meta'>0&ndash;100% gait cycle, R vs L, with a representative normal "
+                    f"reference band (approximate &mdash; see footer). The shaded R/L bands are the "
+                    f"subject's own stride-to-stride variability.</p>"
+                    f"<img src='data:image/png;base64,{b64}' alt='gait cycle kinematics'/>")
+    b64 = _plot_b64(time, coords, TASK_COORDS.get(task))
+    return (f"<h2>Joint-angle curves ({html.escape(task_name)}-relevant, R vs L)</h2>"
+            f"<img src='data:image/png;base64,{b64}' alt='joint angle curves'/>")
+
+
 def _task_panel(task: str, metrics: dict, phase, summary) -> str:
     if task == "squat":
         return _squat_panel(metrics)
     if task == "sts":
         return _sts_panel(metrics)
     return _gait_panel(phase, summary)
+
+
+GAIT_CYCLE_COORDS = ["pelvis_tilt", "hip_flexion", "knee_angle", "ankle_angle"]
+
+
+def _gait_cycle_plot_b64(time, coords) -> str:
+    """Clinical gait plot: per coordinate, the subject's ensemble mean +/- 1SD across
+    strides over 0-100% gait cycle (R vs L), with a labeled normal reference band.
+    Returns '' if too few cycles to ensemble-average (caller falls back to time series)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    norm, pct = gait_cycle.cycle_normalize(time, coords)
+    bases = [b for b in GAIT_CYCLE_COORDS if b in norm]
+    # Need at least one side with >=2 strides to make an ensemble meaningful.
+    has_ensemble = any(s in norm[b] and norm[b][s].shape[0] >= 2
+                       for b in bases for s in ("r", "l"))
+    if not bases or not has_ensemble:
+        return ""
+
+    fig, axes = plt.subplots(len(bases), 1, figsize=(7.2, 2.0 * len(bases)), squeeze=False)
+    for ax, base in zip(axes[:, 0], bases):
+        nb = normative.band(base)
+        if nb is not None:
+            m, sd = nb
+            ax.fill_between(pct, m - sd, m + sd, color="#bdc3c7", alpha=0.35, lw=0,
+                            label="normal (ref)")
+        for side, color in (("r", "#c0392b"), ("l", "#2471a3")):
+            if side not in norm[base]:
+                continue
+            mean, sd = gait_cycle.ensemble(norm[base][side])
+            ax.plot(pct, mean, color=color, lw=1.8, label=side.upper())
+            ax.fill_between(pct, mean - sd, mean + sd, color=color, alpha=0.18, lw=0)
+        ax.set_title(base, fontsize=9, loc="left")
+        ax.axhline(0, color="#ccc", lw=0.6)
+        ax.set_xlim(0, 100)
+        ax.tick_params(labelsize=7)
+        ax.legend(fontsize=6, loc="upper right", ncol=3)
+    axes[-1, 0].set_xlabel("% gait cycle (heel strike -> ipsilateral heel strike)", fontsize=8)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 def _plot_b64(time, coords, names=None) -> str:
@@ -220,6 +280,9 @@ def build_html_report(mot_path, out_html, gait_speed_m_s=None,
             else "NO CYCLES -- global fallback, unreliable")
     speed = f"{gait_speed_m_s:.2f} m/s" if gait_speed_m_s is not None else "n/a"
     caveats = "".join(f"<li>{html.escape(c)}</li>" for c in signatures.GLOBAL_CAVEATS)
+    caveats += ("<li>The grey normal band on the gait-cycle plot is a representative adult "
+                "reference (approximate, morphology after Winter 1991) &mdash; not a population-"
+                "matched normative database. Replace with age/speed-matched data before clinical use.</li>")
 
     doc = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{html.escape(title)}</title><style>
@@ -254,8 +317,7 @@ Generated {(_dt.date.today().isoformat())} &middot; angles in {'deg' if summary[
 plausible causes and the confirming clinical test.</p>
 {_flag_cards(findings)}
 
-<h2>Joint-angle curves ({html.escape(task_name)}-relevant, R vs L)</h2>
-<img src="data:image/png;base64,{_plot_b64(time, coords, TASK_COORDS.get(task))}" alt="joint angle curves"/>
+{_curve_section(task, task_name, time, coords)}
 
 <h2>Range of motion vs normative reference</h2>
 {_rom_table(summary)}

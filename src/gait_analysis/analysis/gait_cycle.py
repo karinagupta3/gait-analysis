@@ -84,3 +84,44 @@ def compute_phase_features(time: np.ndarray, coords: dict[str, np.ndarray],
 
     feat.n_cycles = min(cycle_counts) if cycle_counts else 0
     return feat
+
+
+def cycle_normalize(time: np.ndarray, coords: dict[str, np.ndarray],
+                    n_points: int = 101, min_event_sep_s: float = 0.4):
+    """Resample each coordinate to 0-100% gait cycle, one row per stride.
+
+    Strides are heel-strike to ipsilateral heel-strike, with heel strike taken as the
+    hip-flexion maximum (same kinematic approximation as the phase features above).
+    Returns ({base: {'r': (n_cyc, n_points), 'l': ...}}, percent_axis).
+    """
+    dt = float(np.median(np.diff(time))) if len(time) > 1 else 1.0 / 60
+    min_sep = max(1, int(min_event_sep_s / dt))
+    grid = np.linspace(0.0, 1.0, n_points)
+    out: dict[str, dict[str, np.ndarray]] = {}
+
+    for side in ("r", "l"):
+        hip = coords.get(f"hip_flexion_{side}")
+        if hip is None:
+            continue
+        hs, _ = find_peaks(hip, distance=min_sep)
+        if len(hs) < 2:
+            continue
+        bases = sorted({c[:-2] for c in coords if c.endswith(f"_{side}")})
+        for base in bases:
+            sig = coords.get(f"{base}_{side}")
+            if sig is None:
+                continue
+            cycles = []
+            for a, b in zip(hs[:-1], hs[1:]):
+                if b - a < 3:
+                    continue
+                seg = np.asarray(sig[a:b + 1], float)
+                cycles.append(np.interp(grid, np.linspace(0, 1, len(seg)), seg))
+            if cycles:
+                out.setdefault(base, {})[side] = np.vstack(cycles)
+    return out, grid * 100.0
+
+
+def ensemble(cycles: np.ndarray):
+    """Mean and SD across strides (rows). Returns (mean, sd) over 0-100% gait cycle."""
+    return np.nanmean(cycles, axis=0), np.nanstd(cycles, axis=0)
