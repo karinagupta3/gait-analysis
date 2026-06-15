@@ -24,7 +24,12 @@ dev = ["pytest>=7.4", "tqdm>=4.66"]
 
 [project.scripts]
 gait-pose = "gait_analysis.pose.rtmpose_runner:main"
+gait-pose3d = "gait_analysis.pose.mediapipe3d:main"
 gait-spatiotemporal = "gait_analysis.analysis.spatiotemporal:main"
+gait-kinematics = "gait_analysis.analysis.kinematics:main"
+gait-signatures = "gait_analysis.analysis.signatures:main"
+gait-ik = "gait_analysis.biomech.opensim_ik:main"
+gait-pipeline = "gait_analysis.pipeline:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -27,12 +27,15 @@ src/gait_analysis/
   pose/rtmpose_runner.py        RTMPose 2D keypoints (accurate-mode 2D)  (gait-pose CLI)
   pose/mediapipe3d.py           BlazePose 3D world landmarks, 1 cam  (quick mode)
   biomech/blazepose_to_trc.py   MediaPipe 3D -> OpenSim .trc markers
-  biomech/opensim_ik.py         OpenSim scale + IK -> all joint angles  (Phase-1b scaffold)
+  biomech/markerset.py          keypoint -> OpenSim marker map + IK weights
+  biomech/opensim_setup.py      auto-generate OpenSim IK setup XML from the markerset
+  biomech/opensim_ik.py         OpenSim IK -> all joint angles (validates markers; Phase-1b)
   analysis/spatiotemporal.py    Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
   analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
   analysis/signatures.py        clinical-signature flags (tightness/weakness/neuro/pain) from kinematics
+  pipeline.py                   end-to-end orchestrator  (gait-pipeline CLI; --from-mot runs today)
   config.py                     COCO-17 layout + defaults
-tests/                          offline synthetic tests (no video/network/OpenSim)  — 11 passing
+tests/                          offline synthetic tests (no video/network/OpenSim)  — 19 passing
 setup/setup_macos.sh            Apple Silicon environment setup
 docs/                           research brief, quickstart, quick-mode 3D, clinical signatures
 ```

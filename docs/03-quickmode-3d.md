@@ -42,18 +42,24 @@ python -m gait_analysis.biomech.blazepose_to_trc --npz outputs/walk_mp3d.npz \
     --out outputs/walk.trc
 ```
 
-**3. OpenSim Scale + IK → all joint angles** (Phase-1b — needs OpenSim installed):
+**3. OpenSim IK → all joint angles** (Phase-1b — needs OpenSim installed). The IK setup
+XML is **auto-generated** from `biomech/markerset.py` (no hand-written XML), and the runner
+**validates** that the model's markers exist in the .trc before running:
 ```bash
-python -m gait_analysis.biomech.opensim_ik --model models/LaiUhlrich2022_markers.osim \
-    --trc outputs/walk.trc --ik-setup setups/ik_tasks.xml --out-mot outputs/walk_ik.mot
+gait-ik --model models/LaiUhlrich2022_markers.osim --trc outputs/walk.trc --out-mot outputs/walk_ik.mot
 ```
 
-**4. Report + graphs of every coordinate** (runs now, given any `.mot`):
+**4. Report + signature flags from every coordinate** (runs now, given any `.mot`):
 ```bash
-python -m gait_analysis.analysis.kinematics --mot outputs/walk_ik.mot \
-    --out-plot outputs/walk_angles.png
+gait-pipeline --from-mot outputs/walk_ik.mot --speed 1.2 --plot outputs/walk_angles.png
 ```
-Prints ROM + L/R symmetry per coordinate and writes a grid of curves (R vs L overlaid).
+Prints ROM + L/R symmetry per coordinate, writes a grid of curves (R vs L overlaid), AND
+emits the clinical signature flags (see [docs/04](04-clinical-signatures.md)).
+
+**Whole chain in one call** (once MediaPipe + OpenSim + a marked model are installed):
+```bash
+gait-pipeline --video data/walk.mov --model models/LaiUhlrich2022_markers.osim --outdir outputs --speed 1.2
+```
 
 ## Open engineering tasks for step 3 (honest status)
 
@@ -65,8 +71,22 @@ rather than fabricating numbers.
 
 ## Honesty / accuracy
 
-Single-camera depth (z) is the weakest axis, so **sagittal angles** (flexion/extension:
-hip_flexion, knee_angle, ankle_angle) are usable, while **frontal/transverse** (adduction,
-rotation, subtalar) are **low-confidence** (~8.5° typical single-cam error, worse out of
-plane). The report flags these. For trustworthy frontal/transverse + clinical asymmetry,
-use **accurate mode (2 phones)** — see [build plan §2.3b](01-clinical-landscape-and-build-plan.md).
+Single-camera depth (z) is the weakest axis. With a **naive** landmark-to-IK approach
+(raw MediaPipe → OpenSim) expect ~8.5° MAE and unreliable frontal/transverse angles.
+**But the ceiling is much higher than that:** **OpenCap Monocular** (Gilon, Miller &
+Uhlrich, 2026, [arXiv 2603.24733](https://arxiv.org/abs/2603.24733)) reaches **4.8° MAE
+rotational / 3.4 cm pelvis from a single static smartphone video** — matching 2-camera
+OpenCap — by refining a monocular pose estimate (**WHAM**) via optimization against a
+biomechanically-constrained skeletal model, then estimating kinetics with physics + ML.
+
+So our quick mode should target ~4.8°, not 8.5°, by adopting that *refine-against-the-
+biomechanical-model* idea rather than feeding raw landmarks straight to IK.
+
+⚠️ **Commercial-license caveat:** WHAM (and most monocular 3D-mesh models) are **SMPL**-
+based, and SMPL is **non-commercial** (Meshcapade licence). For a commercial pivot we need
+a non-SMPL monocular backbone or an SMPL licence — the same landmine as OpenPose. MediaPipe
+BlazePose (Apache-2.0) stays clean but is less accurate; this is the trade-off to resolve.
+
+The report flags frontal/transverse coordinates as low-confidence regardless. For the most
+trustworthy frontal/transverse + clinical asymmetry, use **accurate mode (2 phones)** —
+see [build plan §2.3b](01-clinical-landscape-and-build-plan.md).
