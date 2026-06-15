@@ -10,7 +10,8 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "opencv-python>=4.8",      # Apache-2.0 — calibration + video IO
-    "rtmlib>=0.0.13",          # Apache-2.0 — RTMPose runtime (ONNX)
+    "rtmlib>=0.0.13",          # Apache-2.0 — RTMPose runtime (ONNX), accurate-mode 2D
+    "mediapipe>=0.10",         # Apache-2.0, commercial-OK — BlazePose 3D, quick-mode
     "onnxruntime>=1.17",       # MIT — CPU/CoreML execution on Apple Silicon
     "matplotlib>=3.7",         # reporting plots
 ]

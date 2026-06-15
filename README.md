@@ -24,12 +24,16 @@ asymmetry, fall risk, and (carefully framed) muscle‑loading estimates**.
 
 ```
 src/gait_analysis/
-  pose/rtmpose_runner.py      RTMPose 2D keypoints from a video  (gait-pose CLI)
-  analysis/spatiotemporal.py  Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
-  config.py                   COCO-17 layout + defaults
-tests/                        synthetic gait-event tests (no video/network needed)
-setup/setup_macos.sh          Apple Silicon environment setup
-docs/                         research brief + quickstart
+  pose/rtmpose_runner.py        RTMPose 2D keypoints (accurate-mode 2D)  (gait-pose CLI)
+  pose/mediapipe3d.py           BlazePose 3D world landmarks, 1 cam  (quick mode)
+  biomech/blazepose_to_trc.py   MediaPipe 3D -> OpenSim .trc markers
+  biomech/opensim_ik.py         OpenSim scale + IK -> all joint angles  (Phase-1b scaffold)
+  analysis/spatiotemporal.py    Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
+  analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
+  config.py                     COCO-17 layout + defaults
+tests/                          offline synthetic tests (no video/network/OpenSim)  — 8 passing
+setup/setup_macos.sh            Apple Silicon environment setup
+docs/                           research brief, quickstart, quick-mode 3D
 ```
 
 ## Planned stack (all commercial‑license‑safe)
