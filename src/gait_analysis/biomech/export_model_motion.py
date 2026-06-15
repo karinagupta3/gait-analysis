@@ -125,18 +125,20 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
 _VIEWER_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>OpenSim model playback</title>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 <script>
-// Classic script (runs first): surface ANY failure on the page so it's never a silent black screen.
+// Classic script (runs first): a persistent on-page banner. If you do NOT see "viewer build B3"
+// at the top, you are looking at a cached old page -> open in an Incognito window.
 window.__say=function(m,bg){var d=document.getElementById('msg');if(!d){d=document.createElement('div');d.id='msg';
- d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9;font:12px/1.4 monospace;padding:8px;white-space:pre-wrap;color:#fff';
- (document.body||document.documentElement).appendChild(d);} d.style.background=bg||'#7f1d1d'; d.textContent=m;};
-addEventListener('error',function(e){window.__say('JS ERROR: '+(e.message||e.filename||e)+(e.lineno?(' (line '+e.lineno+')'):''));});
-addEventListener('unhandledrejection',function(e){window.__say('PROMISE ERROR: '+((e.reason&&e.reason.message)||e.reason));});
+ d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9;font:12px/1.4 monospace;padding:6px 10px;white-space:pre-wrap;color:#fff';
+ (document.body||document.documentElement).appendChild(d);} d.style.background=bg||'#1e3a5f'; d.textContent=m;};
+window.__say('viewer build B3 -- initializing 3D (if this banner stays blue, the module never ran)...');
+addEventListener('error',function(e){window.__say('JS ERROR: '+(e.message||e.filename||e)+(e.lineno?(' (line '+e.lineno+')'):''),'#7f1d1d');});
+addEventListener('unhandledrejection',function(e){window.__say('PROMISE ERROR: '+((e.reason&&e.reason.message)||e.reason),'#7f1d1d');});
 </script>
 <style>body{margin:0;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
 #bar{position:fixed;bottom:0;left:0;right:0;padding:10px;background:#0e1116cc;display:flex;gap:10px;align-items:center}
 button{background:#2a9d8f;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer}
-input[type=range]{flex:1}#stat{font:12px monospace;color:#9ecbff;white-space:nowrap}</style></head><body>
-<div id="bar"><button id="play">&#10073;&#10073;</button><input id="scrub" type="range" min="0" value="0"><span id="t"></span><span id="stat"></span></div>
+input[type=range]{flex:1}</style></head><body>
+<div id="bar"><button id="play">&#10073;&#10073;</button><input id="scrub" type="range" min="0" value="0"><span id="t"></span></div>
 <script type="module">
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -149,29 +151,36 @@ const ctrl=new OrbitControls(cam,r.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff,0x223,1.2));
 const dl=new THREE.DirectionalLight(0xffffff,0.8); dl.position.set(2,4,3); scene.add(dl);
 scene.add(new THREE.GridHelper(4,16,0x55617a,0x333c52));
+const names=S.bodies.map(b=>b.name);
 // Aim the camera at the model's actual location at frame 0 (so it can't be off-screen).
 let cx=0,cy=0.9,cz=0,nb=0; const f0=S.frames[0]||{};
 for(const k in f0){cx+=f0[k][0]; cy+=f0[k][1]; cz+=f0[k][2]; nb++;}
 if(nb){cx/=nb; cy/=nb; cz/=nb;} ctrl.target.set(cx,cy,cz); cam.position.set(cx+2.2,cy+1.0,cz+2.2);
-const mat=new THREE.MeshLambertMaterial({color:0xe8e2d6});
-const groups={}, loader=new VTKLoader(); let want=0,got=0,fail=0;
-const stat=document.getElementById('stat');
-function status(){stat.textContent='bodies '+S.bodies.length+' · frames '+S.frames.length+' · meshes '+got+'/'+want+(fail?(' · FAILED '+fail):'');}
+// GUARANTEED-visible body-origin point cloud (needs no meshes) -> you always see the skeleton move.
+const oGeo=new THREE.BufferGeometry(), oArr=new Float32Array(names.length*3);
+oGeo.setAttribute('position',new THREE.BufferAttribute(oArr,3));
+scene.add(new THREE.Points(oGeo,new THREE.PointsMaterial({color:0x2dd4bf,size:0.05})));
+// OpenSim bone meshes (enhancement on top of the points).
+const mat=new THREE.MeshLambertMaterial({color:0xe8e2d6}); const groups={}, loader=new VTKLoader(); let want=0,got=0,fail=0;
+function status(extra){window.__say('bodies '+names.length+' · frames '+S.frames.length+' · meshes '+got+'/'+want+(fail?(' · FAILED '+fail):'')+(extra?(' -- '+extra):''), fail?'#7f1d1d':'#14532d');}
 for(const b of S.bodies){const g=new THREE.Group(); groups[b.name]=g; scene.add(g);
   for(const m of b.meshes){ if(!m.found) continue; want++;
     loader.load(m.file, geom=>{geom.computeVertexNormals(); const mesh=new THREE.Mesh(geom,mat);
       mesh.scale.set(...m.scale); mesh.position.set(...m.offset_pos); mesh.quaternion.set(...m.offset_quat); g.add(mesh); got++; status();},
       undefined,
-      err=>{fail++; status(); window.__say('Mesh parse failed: '+m.file+' -- VTKLoader cannot read this .vtp ('+((err&&err.message)||err)+')');}); } }
-status();
+      err=>{fail++; status('VTKLoader cannot read '+m.file);}); } }
+status('rendering');
 let f=0, playing=true, last=0;
 const scrub=document.getElementById('scrub'), play=document.getElementById('play'), tlab=document.getElementById('t');
 scrub.max=S.frames.length-1;
 play.onclick=()=>{playing=!playing; play.innerHTML=playing?'&#10073;&#10073;':'&#9654;';};
 scrub.oninput=()=>{f=+scrub.value; playing=false; play.innerHTML='&#9654;'; apply();};
 function apply(){const fr=S.frames[f];
-  for(const name in groups){const t=fr[name]; if(!t) continue;
-    groups[name].position.set(t[0],t[1],t[2]); groups[name].quaternion.set(t[3],t[4],t[5],t[6]);}
+  for(let i=0;i<names.length;i++){const t=fr[names[i]];
+    if(!t){oArr[i*3]=NaN; continue;}
+    oArr[i*3]=t[0]; oArr[i*3+1]=t[1]; oArr[i*3+2]=t[2];
+    const g=groups[names[i]]; if(g){g.position.set(t[0],t[1],t[2]); g.quaternion.set(t[3],t[4],t[5],t[6]);}}
+  oGeo.attributes.position.needsUpdate=true;
   tlab.textContent=(f/S.fps).toFixed(2)+'s';}
 function loop(ts){requestAnimationFrame(loop);
   if(playing && ts-last>1000/S.fps){f=(f+1)%S.frames.length; scrub.value=f; last=ts;}
