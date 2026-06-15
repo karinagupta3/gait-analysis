@@ -47,6 +47,15 @@ def test_mediapipe_overlay_scaled_to_pixels(tmp_path):
 def test_synced_html_injection(tmp_path):
     p = tmp_path / "rt.npz"
     _save_rtmpose_npz(p)
-    html = synced_html("clip.mp4", kpts2d_from_npz(p), None)
-    assert "__KP__" not in html and "__VIDEO__" not in html and "__SCENE__" not in html
+    html = synced_html("clip.mp4", kpts2d_from_npz(p), None, "none")
+    for ph in ("__KP__", "__VIDEO__", "__SCENE__", "__MODE__"):
+        assert ph not in html
     assert "clip.mp4" in html and "OrbitControls" in html
+
+
+def test_synced_html_model_mode_uses_vtk(tmp_path):
+    p = tmp_path / "rt.npz"
+    _save_rtmpose_npz(p)
+    scene = {"fps": 30, "bodies": [{"name": "pelvis", "meshes": []}], "frames": [{"pelvis": [0, 0, 0, 0, 0, 0, 1]}]}
+    html = synced_html("clip.mp4", kpts2d_from_npz(p), scene, "model")
+    assert "VTKLoader" in html and '"model"' in html and "musculoskeletal model" in html

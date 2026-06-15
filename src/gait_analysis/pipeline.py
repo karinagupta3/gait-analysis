@@ -75,10 +75,10 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     result = report_from_mot(mot, gait_speed_m_s, plot_path=outdir / "joint_angles.png")
     result["mot"] = mot
 
-    # Side-by-side viewer: video+markers (left) synced with the 3D reconstruction (right).
+    # Side-by-side viewer: video+markers (left) synced with the OpenSim model render (right).
     try:
         from .analysis import synced_viewer
-        synced_viewer.build(video, npz, outdir / "synced", trc_path=trc)
+        synced_viewer.build(video, npz, outdir / "synced", model=model, mot=mot)
         result["synced_viewer"] = str(outdir / "synced" / "viewer.html")
     except Exception as exc:
         print(f"[note] synced viewer skipped: {exc}")
