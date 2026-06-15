@@ -40,6 +40,7 @@ src/gait_analysis/
   analysis/tasks.py             task-aware analysis: squat + sit-to-stand (auto-detected)
   analysis/interpretation.py    cited 'what it means / what helps / how to track' per finding
   analysis/report.py            self-contained HTML report (gait-report CLI)
+  web/app.py                    FastAPI web app: upload .mot -> report in browser (gait-web)
   pipeline.py                   orchestrator: --from-mot (now) | --video (quick) | --accurate (2-phone)
   config.py                     COCO-17 layout + defaults
 tests/                          offline synthetic tests (no video/network/OpenSim)  — 33 passing

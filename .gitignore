@@ -22,6 +22,7 @@ data/
 outputs/
 *.onnx
 .rtmlib/
+src/gait_analysis/web/_data/
 
 # OS / editor
 .DS_Store
