@@ -17,6 +17,14 @@ from pathlib import Path
 
 from .marker_placement import PLACEMENTS, validate
 
+# Joint names vary between LaiUhlrich/Rajagopal variants; try aliases before falling back.
+JOINT_ALIASES = {
+    "knee_r": ["knee_r", "walking_knee_r"],
+    "knee_l": ["knee_l", "walking_knee_l"],
+    "acromial_r": ["acromial_r", "shoulder_r", "GlenoHumeral_r"],
+    "acromial_l": ["acromial_l", "shoulder_l", "GlenoHumeral_l"],
+}
+
 
 def _require_opensim():
     try:
@@ -77,7 +85,10 @@ def build(base_model_path: str | Path, out_model_path: str | Path) -> Path:
 
         loc = None
         if p.at_joint:
-            loc = _joint_location_in_body(model, osim, p.at_joint, p.body)
+            for jname in JOINT_ALIASES.get(p.at_joint, [p.at_joint]):
+                loc = _joint_location_in_body(model, osim, jname, p.body)
+                if loc is not None:
+                    break
         if loc is None:
             loc = osim.Vec3(*p.offset)
             fellback.append(p.marker)

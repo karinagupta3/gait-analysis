@@ -91,3 +91,37 @@ gait-pipeline --video data/walk.mov --model LaiUhlrich2022_ga_markers.osim --spe
 - **Pose2Sim API drift:** pin a version; wrap behind `pose2sim_runner.py` so upgrades are localized.
 - **SMPL licence (refinement):** OpenCap-Monocular-grade accuracy via WHAM is non-commercial; the
   commercial-safe non-SMPL backbone is a separate, scheduled task.
+
+---
+
+## Track B end-to-end workflow (build + validate the marked model)
+
+Run on the Mac in the conda `gait` env (OpenSim present). Steps 2-4 need a base `.osim`.
+
+1. **Get a base full-body model** (`LaiUhlrich2022.osim` or similar) from an open source:
+   OpenCap `opencap-core` (`opensimPipeline/Models`), SimTK, or the Pose2Sim bundle. All open.
+2. **Inspect it** so we use its REAL names (don't trust guesses):
+   ```
+   gait-inspect-model --model LaiUhlrich2022.osim
+   ```
+   Paste the BODIES / JOINTS output back here; if a name differs from `biomech/marker_placement.py`
+   (e.g. `walking_knee_r` vs `knee_r` -- already aliased), we reconcile the spec.
+3. **Inject our markers** at the joint centres:
+   ```
+   gait-build-model --base LaiUhlrich2022.osim --out LaiUhlrich2022_ga.osim
+   ```
+4. **Produce a Track-B `.mot`** from a single video (quick mode): MediaPipe 3D -> `.trc` ->
+   scale (`gait-scale`) -> IK (`gait-ik`), or `gait-pipeline --video ... --model LaiUhlrich2022_ga.osim`.
+5. **Validate against Track A** (the Pose2Sim `.mot` you already produced), ideally the SAME trial:
+   ```
+   gait-validate --ref pose2sim_trial.mot --test trackB_trial.mot
+   ```
+   **Acceptance:** sagittal RMSE mean <= ~5 deg (matches single-phone OpenCap Monocular's 4.8 deg).
+   Report frontal/transverse honestly as the weak axis. If a coordinate has a large *bias* (constant
+   offset) but high *r*, it's a marker-placement offset -> nudge that marker in `marker_placement.py`
+   and rebuild; iterate.
+6. **Ship it:** once sagittal RMSE passes, set `GAIT_OSIM_MODEL=LaiUhlrich2022_ga.osim` so the web
+   app's single-video flow produces real angles end-to-end.
+
+The `gait-validate` tool runs offline today; it's the objective gate that turns "the marked model
+exists" into "the marked model is trustworthy."
