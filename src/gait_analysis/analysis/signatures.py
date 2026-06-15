@@ -24,6 +24,8 @@ import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .gait_cycle import PhaseFeatures
+
 # Confidence reflects strength of the underlying evidence + markerless reliability.
 CONF_HIGH, CONF_MOD, CONF_LOW = "high", "moderate", "low"
 
@@ -57,6 +59,7 @@ class Finding:
 class Context:
     gait_speed_m_s: float | None = None
     cadence_steps_per_min: float | None = None
+    phase: PhaseFeatures | None = None     # phase-windowed features (preferred over global min/max)
 
 
 def _rom(summary: dict, name: str):
@@ -192,14 +195,69 @@ RULES = [
     rule_asymmetry,
 ]
 
+
+def phase_findings(phase: PhaseFeatures) -> list[Finding]:
+    """Phase-windowed versions of the sagittal rules (preferred when cycles are found)."""
+    out: list[Finding] = []
+    for s in SIDES:
+        ks = phase.peak_swing_knee_flexion.get(s)
+        if ks is not None and ks < 45:
+            out.append(Finding(
+                "stiff_knee_swing", "neuro",
+                f"Reduced peak knee flexion in swing ({SIDES[s]})",
+                f"knee_angle_{s} (swing peak)", round(ks, 1), "<45 deg (normal ~60-65)",
+                ["stiff-knee gait (rectus femoris over-activity / spasticity)",
+                 "quadriceps over-activity or reduced pre-swing knee flexion velocity",
+                 "post-stroke spastic hemiplegia"],
+                CONF_HIGH, ["Prefer the between-limb difference; speed lowers swing flexion too."]))
+        hx = phase.terminal_stance_hip_ext.get(s)
+        if hx is not None and hx > 0:
+            out.append(Finding(
+                "reduced_hip_extension", "tightness",
+                f"Hip does not reach extension at terminal stance ({SIDES[s]})",
+                f"hip_flexion_{s} (terminal stance)", round(hx, 1), ">0 deg (normal ~ -10)",
+                ["tight hip flexors (iliopsoas / rectus femoris)",
+                 "anterior pelvic tilt compensation", "hip flexion contracture"],
+                CONF_MOD, ["Corroborate with anterior pelvic tilt and a Thomas test."]))
+        df = phase.swing_dorsiflexion.get(s)
+        if df is not None and df < 5:
+            out.append(Finding(
+                "foot_drop", "weakness",
+                f"Reduced swing dorsiflexion ({SIDES[s]}) -- foot-drop / equinus pattern",
+                f"ankle_angle_{s} (swing)", round(df, 1), "<5 deg peak DF (normal ~10)",
+                ["dorsiflexor (tibialis anterior) weakness / foot drop",
+                 "gastroc-soleus tightness (equinus)", "peroneal nerve palsy or UMN lesion"],
+                CONF_MOD, ["Distal/foot markerless reliability is lower -- treat small deficits cautiously."]))
+        ck = phase.stance_min_knee.get(s)
+        if ck is not None and ck > 30:
+            out.append(Finding(
+                "crouch_knee", "tightness",
+                f"Knee never extends in stance ({SIDES[s]}) -- crouch pattern",
+                f"knee_angle_{s} (stance min)", round(ck, 1), ">30 deg (normal <~20)",
+                ["hamstring tightness/short MT length", "hip-flexor contracture",
+                 "plantarflexor weakness", "quadriceps weakness"],
+                CONF_MOD, ["Multifactorial; confirm hamstring length (popliteal angle)."]))
+    return out
+
 _CONF_ORDER = {CONF_HIGH: 0, CONF_MOD: 1, CONF_LOW: 2}
 
 
 def detect(summary: dict, ctx: Context | None = None) -> list[Finding]:
     ctx = ctx or Context()
     findings: list[Finding] = []
-    for rule in RULES:
-        findings.extend(rule(summary, ctx))
+    phase = ctx.phase
+
+    if phase is not None and phase.n_cycles >= 1:
+        # Phase-windowed rules (clinically correct windows) replace the global ones.
+        findings.extend(phase_findings(phase))
+        # Asymmetry is noise on <2 cycles -- only emit it when the trial is long enough.
+        if phase.n_cycles >= 2:
+            findings.extend(rule_asymmetry(summary, ctx))
+    else:
+        # No gait cycles detected -> fall back to global min/max rules.
+        for rule in RULES:
+            findings.extend(rule(summary, ctx))
+
     findings.sort(key=lambda f: _CONF_ORDER.get(f.confidence, 9))
     return findings
 
@@ -210,6 +268,11 @@ def format_findings(findings: list[Finding], ctx: Context | None = None) -> str:
     if ctx.gait_speed_m_s is not None:
         lines.append(f"Gait speed: {ctx.gait_speed_m_s:.2f} m/s "
                      f"(interpret truncation flags relative to this)")
+    if ctx.phase is not None:
+        n = ctx.phase.n_cycles
+        note = "phase-windowed (swing/stance) flags" if n >= 1 else "no gait cycles found -> global fallback"
+        warn = "  -- TOO FEW CYCLES: low confidence, asymmetry suppressed" if 0 < n < 2 else ""
+        lines.append(f"Gait cycles detected: {n}  ({note}){warn}")
     if not findings:
         lines.append("No threshold-grade signature flags triggered.")
     for f in findings:

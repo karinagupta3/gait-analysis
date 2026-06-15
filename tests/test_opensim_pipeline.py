@@ -130,7 +130,8 @@ def test_report_from_mot_runs(tmp_path, capsys):
     assert "Kinematics report" in out
     assert "signature flags" in out
     ids = {f.rule_id for f in result["findings"]}
-    assert "stiff_knee_swing" in ids          # knee max ~35 < 45
+    assert ids & {"stiff_knee_swing", "crouch_knee"}   # a knee flag fired (phase or global path)
+    assert "phase" in result                            # phase features computed
     assert (tmp_path / "p.png").exists()
 
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .analysis import kinematics, signatures
+from .analysis import gait_cycle, kinematics, signatures
 
 
 def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
@@ -28,10 +28,12 @@ def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
     if plot_path:
         print(f"\nWrote plot: {kinematics.plot_coordinates(time, coords, plot_path)}")
 
-    ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s)
+    # Phase-windowed features (swing/stance) -> clinically-correct, less noisy flags.
+    phase = gait_cycle.compute_phase_features(time, coords)
+    ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s, phase=phase)
     findings = signatures.detect(summary, ctx)
     print("\n" + signatures.format_findings(findings, ctx))
-    return {"summary": summary, "findings": findings}
+    return {"summary": summary, "findings": findings, "phase": phase}
 
 
 def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
