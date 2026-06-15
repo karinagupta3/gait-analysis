@@ -30,11 +30,21 @@ src/gait_analysis/
   biomech/opensim_ik.py         OpenSim scale + IK -> all joint angles  (Phase-1b scaffold)
   analysis/spatiotemporal.py    Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
   analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
+  analysis/signatures.py        clinical-signature flags (tightness/weakness/neuro/pain) from kinematics
   config.py                     COCO-17 layout + defaults
-tests/                          offline synthetic tests (no video/network/OpenSim)  — 8 passing
+tests/                          offline synthetic tests (no video/network/OpenSim)  — 11 passing
 setup/setup_macos.sh            Apple Silicon environment setup
-docs/                           research brief, quickstart, quick-mode 3D
+docs/                           research brief, quickstart, quick-mode 3D, clinical signatures
 ```
+
+## Clinical interpretation
+
+The system is built to read **tightness, weakness, injury-risk and neuro/concussion/pain patterns** from
+the joint-angle data — not just step length. See
+**[`docs/04-clinical-signatures.md`](docs/04-clinical-signatures.md)** for the source-cited signature
+library (coordinate, normal vs abnormal threshold, implicated structure, confirming clinical test), the
+honest limits (deviation ≠ cause; speed confound; markerless plane reliability), and how
+`analysis/signatures.py` encodes it.
 
 ## Planned stack (all commercial‑license‑safe)
 
