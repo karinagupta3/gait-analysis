@@ -28,6 +28,23 @@ def test_health_and_index():
     assert r.status_code == 200 and "Gait Analysis" in r.text
 
 
+def test_process_page_has_capture_instructions():
+    c = TestClient(create_app())
+    r = c.get("/process")
+    assert r.status_code == 200
+    assert "How to record" in r.text          # capture instructions (E1)
+    assert "Monocular" in r.text and "Two phones" in r.text
+    assert "OpenSim installed" in r.text       # capability banner (E2)
+
+
+def test_setup_page_explains_opensim():
+    c = TestClient(create_app())
+    r = c.get("/setup")
+    assert r.status_code == 200
+    assert "Adding OpenSim" in r.text
+    assert "GAIT_OSIM_MODEL" in r.text
+
+
 def test_upload_generates_report():
     c = TestClient(create_app())
     r = c.post("/report",
