@@ -29,7 +29,7 @@ def _viewer_html(scene: dict) -> str:
     return _VIEWER_TMPL.replace("__SCENE__", json.dumps(scene))
 
 
-def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150) -> Path:
+def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=None) -> Path:
     import opensim as osim
 
     out_dir = Path(out_dir)
@@ -43,14 +43,25 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150) -> Path:
     idxs = list(range(0, T, step))
     fps = (1.0 / (time[1] - time[0])) / step if T > 1 else 30.0
 
+    # Where the bone .vtp meshes might live (explicit --geometry wins).
+    osim_dir = Path(osim_path).resolve().parent
+    search_dirs = [osim_dir, osim_dir / "Geometry", osim_dir.parent / "Geometry"]
+    if geometry:
+        search_dirs.insert(0, Path(geometry).expanduser())
+    for d in search_dirs:                       # let OpenSim resolve meshes from these dirs too
+        try:
+            osim.ModelVisualizer.addDirToGeometrySearchPaths(str(d))
+        except Exception:
+            pass
+
     model = osim.Model(str(osim_path))
     state = model.initSystem()
 
     # --- collect mesh geometry per body, copy the .vtp files ---
-    osim_dir = Path(osim_path).resolve().parent
-    search_dirs = [osim_dir, osim_dir / "Geometry", osim_dir.parent / "Geometry"]
+    comp_list = (model.getComponentsList if hasattr(model, "getComponentsList")
+                 else model.getComponentList)()
     bodies_geo: dict[str, list] = {}
-    for comp in model.getComponentList():
+    for comp in comp_list:
         mesh = osim.Mesh.safeDownCast(comp)
         if mesh is None:
             continue
@@ -159,8 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mot", required=True, help="Motion .mot (coordinates)")
     ap.add_argument("--out", required=True, help="Output folder")
     ap.add_argument("--max-frames", type=int, default=150)
+    ap.add_argument("--geometry", default=None, help="Folder holding the model's bone .vtp meshes")
     args = ap.parse_args(argv)
-    export_scene(args.model, args.mot, args.out, args.max_frames)
+    export_scene(args.model, args.mot, args.out, args.max_frames, geometry=args.geometry)
     return 0
 
 

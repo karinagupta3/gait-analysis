@@ -71,7 +71,7 @@ def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str) 
 
 
 def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
-          max_frames: int = 150) -> Path:
+          max_frames: int = 150, geometry=None) -> Path:
     """Build the synced viewer folder. If model+mot given, the right pane is the OpenSim model
     (writes geometry/ into out_dir); else if trc given, it's the marker skeleton."""
     out_dir = Path(out_dir)
@@ -84,7 +84,7 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
     if model and mot:
         # Render the actual OpenSim model: export geometry + per-frame body transforms here.
         from ..biomech.export_model_motion import export_scene
-        export_scene(model, mot, out_dir, max_frames=max_frames)   # writes out_dir/{geometry,motion.json}
+        export_scene(model, mot, out_dir, max_frames=max_frames, geometry=geometry)   # writes out_dir/{geometry,motion.json}
         scene3d = json.loads((out_dir / "motion.json").read_text())
         mode = "model"
     elif trc_path:
@@ -171,9 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", default=None, help="OpenSim .osim (right pane = the model)")
     ap.add_argument("--mot", default=None, help="OpenSim .mot driving the model")
     ap.add_argument("--trc", default=None, help="marker .trc (right pane fallback if no model)")
+    ap.add_argument("--geometry", default=None, help="Folder holding the model's bone .vtp meshes")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    build(args.video, args.npz, args.out, trc_path=args.trc, model=args.model, mot=args.mot)
+    build(args.video, args.npz, args.out, trc_path=args.trc, model=args.model, mot=args.mot,
+          geometry=args.geometry)
     return 0
 
 
