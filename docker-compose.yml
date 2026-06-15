@@ -1,0 +1,25 @@
+# Local-prod parity for the web tier. Mirrors what runs on Azure Container Apps.
+# Heavy video->.mot processing (Pose2Sim + OpenSim) is a SEPARATE service/worker
+# (a GPU VM or Container Apps Job) -- not in this compose.
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # When we move the session store off-disk, point these at managed services:
+      # - DATABASE_URL=postgresql://...   (Azure Database for PostgreSQL)
+      # - BLOB_CONN=...                   (Azure Blob Storage for .mot/reports)
+      - PORT=8000
+    restart: unless-stopped
+
+  # Uncomment when the session store moves from files to Postgres:
+  # db:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_PASSWORD: dev
+  #     POSTGRES_DB: gait
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+# volumes:
+#   pgdata:
