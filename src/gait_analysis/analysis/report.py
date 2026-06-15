@@ -107,17 +107,35 @@ def _sts_panel(m: dict) -> str:
     return _table(rows)
 
 
-def _gait_panel(phase, summary) -> str:
+def _gait_panel(phase, summary, trc_path=None) -> str:
     n = phase.n_cycles
     dur = summary["duration_s"]
     cad = (n * 2) / dur * 60 if (dur > 0 and n) else None   # 2 steps per cycle
-    rows = [
+    st = None
+    if trc_path is not None:
+        try:
+            from . import spatiotemporal_3d
+            st = spatiotemporal_3d.compute(trc_path)
+        except Exception:
+            st = None
+    if st and st.get("available"):
+        sl = st["stride_length_m"]
+        return _table([
+            ("Walking speed", _fmt(st["speed_m_s"], "m/s"), "~1.2-1.4 self-selected; <1.0 = slow"),
+            ("Cadence", _fmt(st["cadence_steps_min"], "steps/min"), "~100-120"),
+            ("Stride length (R / L)", f"{_fmt(sl['r'], 'm')} / {_fmt(sl['l'], 'm')}", "~1.2-1.5 m"),
+            ("Stance phase (R / L)", f"{_fmt(st['stance_pct']['r'], '%')} / {_fmt(st['stance_pct']['l'], '%')}",
+             "~60% of the gait cycle"),
+            ("Step width", _fmt(st["step_width_m"], "m"), "~0.08-0.12 m"),
+            ("Stride-length symmetry", _fmt(st["stride_length_symmetry"] * 100, "%")
+             if st["stride_length_symmetry"] == st["stride_length_symmetry"] else "n/a", ">95% (1.0 = symmetric)"),
+        ])
+    return _table([
         ("Gait cycles analyzed", n, ""),
         ("Cadence (estimated)", _fmt(cad, "steps/min") if cad else "n/a", "~100-120"),
         ("Stride/step length, double-support, step width", "needs the marker .trc",
-         "spatiotemporal from foot markers (Track A) -- coming"),
-    ]
-    return _table(rows)
+         "pass the Pose2Sim/quick-mode .trc to get metric spatiotemporal"),
+    ])
 
 
 def _curve_section(task: str, task_name: str, time, coords) -> str:
@@ -135,12 +153,12 @@ def _curve_section(task: str, task_name: str, time, coords) -> str:
             f"<img src='data:image/png;base64,{b64}' alt='joint angle curves'/>")
 
 
-def _task_panel(task: str, metrics: dict, phase, summary) -> str:
+def _task_panel(task: str, metrics: dict, phase, summary, trc_path=None) -> str:
     if task == "squat":
         return _squat_panel(metrics)
     if task == "sts":
         return _sts_panel(metrics)
-    return _gait_panel(phase, summary)
+    return _gait_panel(phase, summary, trc_path)
 
 
 GAIT_CYCLE_COORDS = ["pelvis_tilt", "hip_flexion", "knee_angle", "ankle_angle"]
@@ -267,7 +285,8 @@ def _rom_table(summary) -> str:
 
 
 def build_html_report(mot_path, out_html, gait_speed_m_s=None,
-                      subject: str | None = None, title: str = "Gait Analysis Report") -> Path:
+                      subject: str | None = None, title: str = "Gait Analysis Report",
+                      trc_path=None) -> Path:
     time, coords, meta = kinematics.read_storage(mot_path)
     summary = kinematics.summarize(time, coords, meta)
     phase = gait_cycle.compute_phase_features(time, coords)
@@ -310,7 +329,7 @@ Generated {(_dt.date.today().isoformat())} &middot; angles in {'deg' if summary[
 
 <h2>Key metrics &mdash; {html.escape(task_name)}</h2>
 <p class="meta">The measures that matter clinically for this action.</p>
-{_task_panel(task, metrics, phase, summary)}
+{_task_panel(task, metrics, phase, summary, trc_path)}
 
 <h2>Clinical signature flags</h2>
 <p class="meta">Research decision-support, <b>not a diagnosis</b>. Each flag lists multiple
@@ -338,8 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", required=True, help="Output .html")
     ap.add_argument("--speed", type=float, default=None)
     ap.add_argument("--subject", default=None)
+    ap.add_argument("--trc", default=None, help="Marker .trc for metric spatiotemporal (gait)")
     args = ap.parse_args(argv)
-    out = build_html_report(args.mot, args.out, args.speed, args.subject)
+    out = build_html_report(args.mot, args.out, args.speed, args.subject, trc_path=args.trc)
     print(f"Wrote {out}")
     return 0
 
