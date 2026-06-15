@@ -35,6 +35,7 @@ gait-scale = "gait_analysis.biomech.opensim_ik:main_scale"
 gait-validate = "gait_analysis.analysis.validate:main"
 gait-inspect-model = "gait_analysis.biomech.inspect_model:main"
 gait-build-model = "gait_analysis.biomech.build_marked_model:main"
+gait-export-3d = "gait_analysis.biomech.export_model_motion:main"
 gait-pipeline = "gait_analysis.pipeline:main"
 gait-web = "gait_analysis.web.app:run"
 

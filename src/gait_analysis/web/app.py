@@ -29,7 +29,8 @@ except ImportError:  # pragma: no cover - exercised only without the extra
 
 
 # On-disk store: DATA_DIR/sessions/<id>/{meta.json, trial.mot, report.html}
-DATA_DIR = Path(__file__).resolve().parent / "_data"
+# Override with GAIT_STORE_DIR (e.g. /tmp on read-only serverless filesystems).
+DATA_DIR = Path(os.environ.get("GAIT_STORE_DIR", Path(__file__).resolve().parent / "_data"))
 
 
 def _store_dir() -> Path:
