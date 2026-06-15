@@ -1,0 +1,7 @@
+.git
+tests
+docs
+setup
+src/gait_analysis/web/_data
+**/__pycache__
+*.pyc

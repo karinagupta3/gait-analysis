@@ -63,6 +63,8 @@ or <a href="/process">process a video &rarr;</a></div>
   <label>Trial label</label><input name="trial" placeholder="e.g. squats / overground walk">
   <label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01" placeholder="1.2">
   <label>OpenSim .mot file</label><input name="mot" type="file" accept=".mot,.sto" required>
+  <label>Marker .trc (optional &mdash; enables 3D playback + metric spatiotemporal)</label>
+  <input name="trc" type="file" accept=".trc">
   <button type="submit">Generate report</button>
 </form>
 <h2>Recent trials</h2>{sessions}
@@ -234,17 +236,22 @@ def create_app(process_fn=None):
 
     @app.post("/report", response_class=HTMLResponse)
     async def make_report(mot: UploadFile, subject: str = Form(""),
-                          trial: str = Form(""), speed: str = Form("")):
+                          trial: str = Form(""), speed: str = Form(""),
+                          trc: UploadFile | None = None):
         sid = uuid.uuid4().hex[:8]
         sdir = _store_dir() / sid
         sdir.mkdir(parents=True, exist_ok=True)
         mot_path = sdir / "trial.mot"
         mot_path.write_bytes(await mot.read())
+        trc_path = None
+        if trc is not None and (trc.filename or "").strip():
+            trc_path = sdir / "markers.trc"
+            trc_path.write_bytes(await trc.read())
         spd = float(speed) if speed.strip() else None
         html_path = sdir / "report.html"
         title = f"{subject or 'Subject'} : {trial or 'trial'}"
         report.build_html_report(mot_path, html_path, gait_speed_m_s=spd,
-                                 subject=subject or None, title=title)
+                                 subject=subject or None, title=title, trc_path=trc_path)
         meta = {"id": sid, "subject": subject, "trial": trial, "speed": spd,
                 "created": _dt.datetime.now().isoformat()}
         (sdir / "meta.json").write_text(json.dumps(meta))
