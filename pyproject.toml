@@ -1,0 +1,33 @@
+[project]
+name = "gait-analysis"
+version = "0.1.0"
+description = "Markerless gait analysis on iPhone video + Apple Silicon (commercial-license-safe stack)"
+requires-python = ">=3.10"
+# Pinned to commercial-license-safe deps only (Apache-2.0 / BSD / MIT).
+# Deliberately NOT using OpenPose (paid commercial license, excludes sports)
+# or Ultralytics YOLO (AGPL). See docs/01-clinical-landscape-and-build-plan.md s2.2.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "opencv-python>=4.8",      # Apache-2.0 — calibration + video IO
+    "rtmlib>=0.0.13",          # Apache-2.0 — RTMPose runtime (ONNX)
+    "onnxruntime>=1.17",       # MIT — CPU/CoreML execution on Apple Silicon
+    "matplotlib>=3.7",         # reporting plots
+]
+
+[project.optional-dependencies]
+# Heavier / environment-specific pieces, installed separately (see setup/setup_macos.sh):
+#   - pose2sim  (BSD-3)   : multi-view triangulation -> OpenSim  (accurate mode)
+#   - opensim   (Apache-2): IK/ID  (note: may need x86_64 Rosetta conda on M-series)
+dev = ["pytest>=7.4", "tqdm>=4.66"]
+
+[project.scripts]
+gait-pose = "gait_analysis.pose.rtmpose_runner:main"
+gait-spatiotemporal = "gait_analysis.analysis.spatiotemporal:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

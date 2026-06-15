@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Data & model artifacts (keep the repo light; these are large/binary)
+data/
+*.mov
+*.mp4
+*.npz
+*.trc
+*.c3d
+*.osim
+*.sto
+*.mot
+outputs/
+*.onnx
+.rtmlib/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
