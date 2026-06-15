@@ -32,13 +32,15 @@ CONF_HIGH, CONF_MOD, CONF_LOW = "high", "moderate", "low"
 SIDES = {"r": "right", "l": "left"}
 
 GLOBAL_CAVEATS = [
-    "Not a diagnosis: a kinematic pattern localizes the movement deficit, not its cause "
-    "(weakness, tightness, structural limit, or pain can look alike).",
-    "Walking speed confounds truncation flags -- report and ideally control gait speed.",
-    "Frontal/transverse coordinates are advisory: single-camera markerless error there "
-    "(>6 deg) can exceed the signal. Trust sagittal flags more.",
-    "Confirm clinically (manual length/strength tests, and for spasticity a "
-    "velocity-dependent passive test).",
+    "This is decision-support, not a diagnosis. The same movement pattern can come from "
+    "muscle weakness, tightness, a joint/structural limit, or pain -- so a flag shows WHERE "
+    "to look, not the cause.",
+    "Walking slowly naturally reduces motion, so a 'reduced' flag may just reflect a slow "
+    "walk. Always read these alongside the walking speed.",
+    "Side-to-side (frontal) and rotation angles are less reliable from markerless video -- "
+    "treat those as a hint, not a measurement. Bend/straighten (sagittal) angles are the "
+    "trustworthy ones.",
+    "Confirm any flag with a hands-on test (e.g. muscle length or strength testing).",
 ]
 
 
@@ -181,8 +183,8 @@ def rule_asymmetry(summary, ctx):
                 f"Left/right asymmetry in {base} ROM",
                 base, round(ratio, 3), "outside 0.90-1.10 (1.0 = symmetric)",
                 interp, CONF_MOD,
-                ["Asymmetry detection fails for BILATERAL disease (both sides truncated) "
-                 "-- pair with absolute thresholds."]))
+                ["If both sides are affected equally, this left/right comparison can look "
+                 "normal -- so also compare each side to typical values, not just to each other."]))
     return out
 
 

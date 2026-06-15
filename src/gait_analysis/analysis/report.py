@@ -35,6 +35,10 @@ NORM_REF = {
 
 _CONF_COLOR = {"high": "#c0392b", "moderate": "#d68910", "low": "#7f8c8d"}
 
+# Clinically key coordinates to chart by default (one clean panel each, like OpenCap).
+KEY_COORDS = ["pelvis_tilt", "pelvis_list", "pelvis_rotation",
+              "hip_flexion", "hip_adduction", "knee_angle", "ankle_angle", "arm_flex"]
+
 
 def _base(name: str) -> str:
     for suf in ("_r", "_l", "_beta"):
@@ -44,14 +48,41 @@ def _base(name: str) -> str:
 
 
 def _plot_b64(time, coords) -> str:
-    """Render the coordinate grid to an embedded base64 PNG."""
+    """One clean panel per coordinate (real .mot data vs time, R/L overlaid)."""
     import matplotlib
     matplotlib.use("Agg")
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp:
-        kinematics.plot_coordinates(time, coords, tmp.name)
-        data = Path(tmp.name).read_bytes()
-    return base64.b64encode(data).decode("ascii")
+    import matplotlib.pyplot as plt
+
+    bases = [b for b in KEY_COORDS
+             if b in coords or f"{b}_r" in coords or f"{b}_l" in coords]
+    if not bases:                                   # fall back to whatever exists
+        bases = sorted({_base(c) for c in coords})[:8]
+    n = len(bases) or 1
+    fig, axes = plt.subplots(n, 1, figsize=(9, 2.0 * n), squeeze=False, sharex=True)
+    for i, b in enumerate(bases):
+        ax = axes[i][0]
+        bilateral = False
+        if f"{b}_r" in coords:
+            ax.plot(time, coords[f"{b}_r"], color="#1f77b4", lw=1.6, label="right")
+            bilateral = True
+        if f"{b}_l" in coords:
+            ax.plot(time, coords[f"{b}_l"], color="#d62728", lw=1.6, label="left")
+            bilateral = True
+        if b in coords:
+            ax.plot(time, coords[b], color="#2a9d8f", lw=1.6, label=b)
+        ax.set_title(b, fontsize=10, loc="left", fontweight="bold")
+        ax.set_ylabel("degrees", fontsize=8)
+        ax.grid(alpha=0.3)
+        ax.tick_params(labelsize=8)
+        if bilateral:
+            ax.legend(fontsize=7, loc="upper right", ncol=2)
+    axes[-1][0].set_xlabel("time (s)", fontsize=9)
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _flag_cards(findings) -> str:
