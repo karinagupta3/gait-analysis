@@ -56,8 +56,8 @@ The next layer renders the full OpenSim musculoskeletal model (see roadmap).</p>
 <div style="margin-top:8px"><button id="viz-play" type="button">&#10073;&#10073; Pause</button>
 <input id="viz-scrub" type="range" min="0" max="0" value="0" style="width:68%;vertical-align:middle"></div>
 <script type="module">
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import {OrbitControls} from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 const S = __SCENE__;
 const el = document.getElementById('viz'), W = el.clientWidth, H = el.clientHeight;
 const scene = new THREE.Scene();

@@ -40,7 +40,7 @@ def test_report_section_embeds_viewer(tmp_path):
     _walk_trc(p)
     html = viz3d.report_section(p)
     assert "3D motion playback" in html
-    assert "three.module.js" in html and "__SCENE__" not in html   # scene injected
+    assert "from 'three'" in html and "__SCENE__" not in html   # bare import (map in report head); scene injected
 
 
 def test_report_section_graceful_on_bad_trc(tmp_path):

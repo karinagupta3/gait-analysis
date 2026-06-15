@@ -37,3 +37,4 @@ def test_build_html_report(tmp_path):
     assert "data:image/png;base64," in text          # embedded plot
     assert "Data confidence" in text
     assert "Demo" in text                             # subject metadata
+    assert 'type="importmap"' in text                 # so the embedded 3D viewer's bare 'three' import resolves

@@ -123,15 +123,16 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
 
 
 _VIEWER_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>OpenSim model playback</title>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 <style>body{margin:0;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
 #bar{position:fixed;bottom:0;left:0;right:0;padding:10px;background:#0e1116cc;display:flex;gap:10px;align-items:center}
 button{background:#2a9d8f;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer}
 input[type=range]{flex:1}</style></head><body>
 <div id="bar"><button id="play">&#10073;&#10073;</button><input id="scrub" type="range" min="0" value="0"><span id="t"></span></div>
 <script type="module">
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import {OrbitControls} from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-import {VTKLoader} from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/VTKLoader.js';
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
 const S = __SCENE__;
 const scene=new THREE.Scene();
 const cam=new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 100); cam.position.set(2.2,1.2,2.2);

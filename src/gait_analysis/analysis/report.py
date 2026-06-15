@@ -304,7 +304,9 @@ def build_html_report(mot_path, out_html, gait_speed_m_s=None,
                 "matched normative database. Replace with age/speed-matched data before clinical use.</li>")
 
     doc = f"""<!doctype html><html><head><meta charset="utf-8">
-<title>{html.escape(title)}</title><style>
+<title>{html.escape(title)}</title>
+<script type="importmap">{{"imports":{{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}}}</script>
+<style>
 body{{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:980px;margin:24px auto;padding:0 16px;color:#222}}
 h1{{margin:0 0 4px}} h2{{border-bottom:2px solid #eee;padding-bottom:4px;margin-top:32px}}
 .meta{{color:#666;font-size:13px}} .banner{{padding:10px 14px;border-radius:8px;background:#f4f6f8;margin:14px 0}}

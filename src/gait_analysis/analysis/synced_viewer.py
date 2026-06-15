@@ -97,6 +97,7 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
 
 
 _TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Video + OpenSim (synced)</title>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 <style>body{margin:0;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
 .wrap{display:flex;flex-wrap:wrap;gap:8px;padding:8px}.pane{flex:1 1 420px;position:relative;min-width:360px}
 #vid{width:100%;display:block;border-radius:8px;background:#000}#ov{position:absolute;left:0;top:0;pointer-events:none}
@@ -107,9 +108,9 @@ _TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Video + OpenS
   <div class="pane"><h3>OpenSim rendering <span class="tag" id="rkind"></span></h3><div id="viz"></div></div>
 </div>
 <script type="module">
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import {OrbitControls} from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-import {VTKLoader} from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/VTKLoader.js';
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
 const KP=__KP__, S=__SCENE__, MODE=__MODE__, vid=document.getElementById('vid');
 document.getElementById('rkind').textContent = MODE==='model'?'(musculoskeletal model)':MODE==='markers'?'(marker skeleton)':'(no 3D)';
 // ---- left: 2D overlay on canvas, scaled to displayed video size ----
