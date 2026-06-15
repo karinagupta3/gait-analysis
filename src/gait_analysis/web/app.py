@@ -49,122 +49,160 @@ def _list_sessions() -> list[dict]:
     return sorted(out, key=lambda m: m.get("created", ""), reverse=True)
 
 
-INDEX_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Gait Analysis</title>
-<style>body{{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:30px auto;padding:0 16px;color:#222}}
-h1{{margin-bottom:4px}} .sub{{color:#666;margin-bottom:24px}} form{{background:#f7f9fb;border:1px solid #e6eaee;border-radius:10px;padding:18px}}
-label{{display:block;margin:10px 0 4px;font-weight:600}} input{{padding:7px;border:1px solid #cdd5dc;border-radius:6px;width:100%}}
-button{{margin-top:16px;background:#2a9d8f;color:#fff;border:0;border-radius:7px;padding:10px 18px;font-size:15px;cursor:pointer}}
-.s{{display:block;padding:10px 12px;border:1px solid #eee;border-radius:8px;margin:8px 0;text-decoration:none;color:#222}}
-.s:hover{{background:#f4f6f8}} .s small{{color:#777}}</style></head><body>
-<h1>Gait Analysis</h1><div class="sub">Upload an OpenSim <code>.mot</code> to generate a clinical report,
-or <a href="/process">process a video &rarr;</a></div>
+BASE_CSS = """
+:root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--card:#fff;
+ --accent:#0d9488;--accent-d:#0f766e;--accent-soft:#f0fdfa;--ok:#15803d;--bad:#b91c1c;--radius:14px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-d);text-decoration:none}a:hover{text-decoration:underline}
+header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.bar{max-width:900px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--ink);font-size:16px}
+.brand:hover{text-decoration:none}
+.logo{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#22d3ee)}
+nav{display:flex;gap:2px}
+nav a{color:var(--muted);font-size:14px;padding:6px 12px;border-radius:8px}
+nav a:hover{color:var(--ink);background:var(--bg);text-decoration:none}
+nav a.active{color:var(--accent-d);background:var(--accent-soft)}
+main{max-width:900px;margin:0 auto;padding:28px 20px 48px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+h2.section{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:32px 0 12px;font-weight:600}
+.lead{color:var(--muted);margin:0}.hero{margin-bottom:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+label{display:block;font-size:13px;font-weight:600;color:#334155;margin:14px 0 6px}
+.card form>label:first-of-type,.row2 label{margin-top:0}
+input,select{width:100%;padding:10px 12px;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:9px;outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.btn{display:inline-flex;align-items:center;gap:8px;margin-top:18px;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:11px 20px;font:inherit;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover{background:var(--accent-d)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:560px){.row2{grid-template-columns:1fr}}
+.slist{display:flex;flex-direction:column;gap:8px}
+.s{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:13px 16px;color:var(--ink)}
+.s:hover{border-color:#cbd5e1;text-decoration:none;box-shadow:0 1px 3px rgba(16,24,40,.06)}
+.s .who{font-weight:600}.s .meta{color:var(--muted);font-size:13px}
+.empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:11px;padding:22px;text-align:center}
+.banner{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 18px}
+.banner b{display:block;margin-bottom:6px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.steps{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 20px;margin:0 0 18px}
+.steps h3{margin:14px 0 6px;font-size:15px}.steps ul{margin:6px 0 12px;padding-left:20px}.steps li{margin:4px 0}
+.note{color:var(--muted);font-size:13px}
+code{background:#f1f5f9;padding:1px 6px;border-radius:5px;font-size:13px}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:10px;overflow:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+.badge{font-size:13px;font-weight:600;color:var(--accent-d);background:var(--accent-soft);padding:2px 12px;border-radius:999px;vertical-align:middle}
+.err{color:var(--bad);margin:0 0 14px;font-weight:600}
+footer{max-width:900px;margin:0 auto;padding:22px 20px 40px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
+"""
+
+
+def _shell(title: str, body: str, active: str = "") -> str:
+    def nav(href, label, key):
+        return f'<a class="{"active" if key == active else ""}" href="{href}">{label}</a>'
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>{title}</title><style>{BASE_CSS}</style></head><body>'
+            f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait Analysis</a>'
+            f'<nav>{nav("/", "New report", "index")}{nav("/process", "Process video", "process")}'
+            f'{nav("/setup", "Setup", "setup")}</nav></div></header>'
+            f'<main>{body}</main>'
+            f'<footer>Gait Analysis · clinical kinematics from OpenSim</footer></body></html>')
+
+
+_INDEX_FORM = """<div class="card">
 <form action="/report" method="post" enctype="multipart/form-data">
-  <label>Subject</label><input name="subject" placeholder="e.g. J. Smith">
-  <label>Trial label</label><input name="trial" placeholder="e.g. squats / overground walk">
+  <div class="row2">
+    <div><label>Subject</label><input name="subject" placeholder="e.g. J. Smith"></div>
+    <div><label>Trial label</label><input name="trial" placeholder="e.g. overground walk"></div>
+  </div>
   <label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01" placeholder="1.2">
   <label>OpenSim .mot file</label><input name="mot" type="file" accept=".mot,.sto" required>
   <label>Marker .trc (optional &mdash; enables 3D playback + metric spatiotemporal)</label>
   <input name="trc" type="file" accept=".trc">
-  <button type="submit">Generate report</button>
-</form>
-<h2>Recent trials</h2>{sessions}
-</body></html>"""
+  <button class="btn" type="submit">Generate report</button>
+</form></div>"""
 
 
 def _render_index() -> str:
     sessions = _list_sessions()
     if not sessions:
-        rows = "<p style='color:#777'>No trials yet.</p>"
+        rows = '<div class="empty">No trials yet &mdash; upload a <code>.mot</code> to get started.</div>'
     else:
         rows = "".join(
-            f'<a class="s" href="/session/{s["id"]}"><b>{s.get("subject","?")}</b> '
-            f'&middot; {s.get("trial","trial")} <small>&middot; {s.get("created","")[:16]}</small></a>'
+            f'<a class="s" href="/session/{s["id"]}">'
+            f'<span><span class="who">{s.get("subject") or "Subject"}</span>'
+            f'<span class="meta"> &middot; {s.get("trial") or "trial"}</span></span>'
+            f'<span class="meta">{s.get("created","")[:16].replace("T"," ")}</span></a>'
             for s in sessions)
-    return INDEX_TMPL.format(sessions=rows)
+    body = (f'<section class="hero"><h1>Gait Analysis</h1>'
+            f'<p class="lead">Upload an OpenSim <code>.mot</code> to generate a clinical report, '
+            f'or <a href="/process">process a video</a>.</p></section>'
+            f'{_INDEX_FORM}'
+            f'<h2 class="section">Recent trials</h2><div class="slist">{rows}</div>')
+    return _shell("Gait Analysis", body, "index")
 
 
-_PAGE_CSS = """body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:820px;margin:30px auto;padding:0 16px;color:#222}
-form{background:#f7f9fb;border:1px solid #e6eaee;border-radius:10px;padding:18px}label{display:block;margin:10px 0 4px;font-weight:600}
-input,select{padding:7px;border:1px solid #cdd5dc;border-radius:6px;width:100%}button{margin-top:16px;background:#2a9d8f;color:#fff;border:0;border-radius:7px;padding:10px 18px;cursor:pointer}
-.note{color:#777;font-size:13px}.ok{color:#1e8449}.bad{color:#c0392b}
-.banner{padding:10px 14px;border-radius:8px;margin:14px 0;border:1px solid #e6eaee}
-.steps{background:#fbfcfd;border:1px solid #eef1f4;border-radius:10px;padding:8px 18px;margin:14px 0}
-.steps h3{margin:12px 0 4px}.steps li{margin:3px 0}"""
-
-# Capture protocol (after the OpenCap recording guidance + Pose2Sim multi-cam notes).
+# Capture protocol (after OpenCap recording guidance + Pose2Sim multi-cam notes).
 CAPTURE_HTML = """<div class="steps">
 <h3>How to record (read before capturing)</h3>
-<p class="note">Good kinematics start with good video. Same rules as OpenCap-style capture.</p>
+<p class="note">Good kinematics start with good video &mdash; same rules as OpenCap-style capture.</p>
 <b>Monocular (1 phone) &mdash; quick mode</b>
 <ul>
 <li><b>Placement:</b> phone on a tripod, ~3&ndash;4 m from the subject, lens at hip height, landscape.</li>
 <li><b>View:</b> for <b>walking</b> film the <b>side</b> (sagittal) view; for <b>squats / sit-to-stand</b> film a 3/4 front view so both knees are visible.</li>
-<li><b>Frame:</b> keep the <b>whole body in frame</b> for the entire movement; don't pan/zoom.</li>
-<li><b>Quality:</b> 60 fps if possible, good even lighting, plain background, fitted clothing, shoes/feet visible.</li>
+<li><b>Frame:</b> keep the <b>whole body in frame</b> for the entire movement; don't pan or zoom.</li>
+<li><b>Quality:</b> 60 fps if possible, even lighting, plain background, fitted clothing, feet visible.</li>
 <li><b>Content:</b> walking &rarr; 4&ndash;6 strides; squats &rarr; 3&ndash;5 reps; sit-to-stand &rarr; 5 rises (for 5xSTS).</li>
 </ul>
 <b>Two phones &mdash; accurate mode (Pose2Sim)</b>
 <ul>
-<li>Two phones ~60&deg; apart, both seeing the whole body; <b>genlock not needed</b> but start both before the subject moves.</li>
-<li>Record a <b>calibration object</b> (checkerboard) visible to both cameras first &mdash; required for metric (real-world) scale.</li>
+<li>Two phones ~60&deg; apart, both seeing the whole body; <b>genlock not needed</b>, but start both before the subject moves.</li>
+<li>Record a <b>calibration object</b> (checkerboard) visible to both cameras first &mdash; required for metric scale.</li>
 <li>2-phone runs on the CLI today (<code>gait-pipeline</code>); in-app upload is on the roadmap (A3).</li>
 </ul></div>"""
 
-PROCESS_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Process video</title>
-<style>{css}</style></head><body>
-<h1>Process a video</h1>
-{banner}
-{capture}
-<form action="/process" method="post" enctype="multipart/form-data">
-  <label>Subject</label><input name="subject" placeholder="e.g. J. Smith">
-  <label>Trial label</label><input name="trial" placeholder="e.g. squats / overground walk">
-  <label>Task hint (optional)</label><input name="trial_hint" placeholder="walking | squat | sit-to-stand">
-  <label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01">
-  <label>Mode</label><select name="mode"><option value="quick">quick (1 phone)</option></select>
-  <label>Video</label><input name="video" type="file" accept="video/*" required>
-  <button type="submit">Upload &amp; process</button>
-</form>
-<p><a href="/">&larr; back</a> &middot; <a href="/setup">environment setup</a></p></body></html>"""
 
-SETUP_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Setup</title>
-<style>{css} pre{{background:#f4f6f8;padding:10px;border-radius:8px;white-space:pre-wrap}}</style></head><body>
-<h1>Environment setup</h1>
-{banner}
-<h2>Adding OpenSim (needed for joint angles)</h2>
-<p class="note">Reports from an existing <code>.mot</code> work without OpenSim. Processing a <b>video</b>
-into joint angles needs OpenSim + a marked model.</p>
-<ol>
-<li>Install <a href="https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/">OpenSim</a> via conda:
-<pre>conda create -n gait python=3.11
-conda activate gait
-conda install -c opensim-org opensim
-pip install -e ".[web]" mediapipe</pre></li>
-<li>Build a marked model (Track B) and point the app at it:
-<pre>gait-inspect-model --model LaiUhlrich2022.osim   # check names
-gait-build-model --base LaiUhlrich2022.osim --out LaiUhlrich2022_ga.osim
-export GAIT_OSIM_MODEL=$PWD/LaiUhlrich2022_ga.osim
-gait-web</pre></li>
-<li>Validate it against your Pose2Sim output before trusting it:
-<pre>gait-validate --ref pose2sim.mot --test quick.mot   # sagittal RMSE &le; ~5&deg;</pre></li>
-</ol>
-<p class="note">See <code>docs/05</code> (Track B) and <code>docs/10</code> (setup &amp; capture).</p>
-<p><a href="/">&larr; back</a></p></body></html>"""
+def _process_body() -> str:
+    return (f'<section class="hero"><h1>Process a video</h1>'
+            f'<p class="lead">Single-phone quick mode: video &rarr; pose estimation &rarr; OpenSim &rarr; clinical report.</p></section>'
+            f'{_status_banner()}{CAPTURE_HTML}'
+            f'<div class="card"><form action="/process" method="post" enctype="multipart/form-data">'
+            f'<div class="row2"><div><label>Subject</label><input name="subject" placeholder="e.g. J. Smith"></div>'
+            f'<div><label>Trial label</label><input name="trial" placeholder="e.g. squats"></div></div>'
+            f'<label>Task hint (optional)</label><input name="trial_hint" placeholder="walking | squat | sit-to-stand">'
+            f'<label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01">'
+            f'<label>Mode</label><select name="mode"><option value="quick">quick (1 phone)</option></select>'
+            f'<label>Video</label><input name="video" type="file" accept="video/*" required>'
+            f'<button class="btn" type="submit">Upload &amp; process</button></form></div>')
 
-JOB_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Processing</title>
+
+def _setup_body() -> str:
+    return (f'<section class="hero"><h1>Environment setup</h1>'
+            f'<p class="lead">Reports from an existing <code>.mot</code> work out of the box. '
+            f'Turning a <b>video</b> into joint angles needs OpenSim + a marked model.</p></section>'
+            f'{_status_banner()}'
+            '<div class="card"><h3 style="margin-top:6px">Adding OpenSim (for video &rarr; joint angles)</h3>'
+            '<p class="note">1. Install OpenSim + the app extras:</p>'
+            '<pre><code>conda create -n gait python=3.11\nconda activate gait\n'
+            'conda install -c opensim-org opensim\npip install -e ".[web]" mediapipe</code></pre>'
+            '<p class="note">2. Build a marked model and point the app at it via <code>GAIT_OSIM_MODEL</code>:</p>'
+            '<pre><code>gait-build-model --base LaiUhlrich2022.osim --out LaiUhlrich2022_ga.osim\n'
+            'export GAIT_OSIM_MODEL=$PWD/LaiUhlrich2022_ga.osim\ngait-web</code></pre>'
+            '<p class="note">3. Validate it against your Pose2Sim output before trusting it '
+            '(<code>gait-validate</code>; sagittal RMSE &le; ~5&deg;).</p></div>')
+
+
+_JOB_BODY = """<section class="hero"><h1>Processing&hellip; <span id="st" class="badge">queued</span></h1>
+<p class="lead">Pose estimation + OpenSim can take a few minutes. This page updates live and opens the report when done.</p></section>
+<div class="err" id="err"></div>
+<div class="card"><pre id="log">starting&hellip;</pre></div>
 <script>
-async function poll(){{const r=await fetch('/api/job/{jid}');const j=await r.json();
+async function poll(){const r=await fetch('/api/job/__JID__');const j=await r.json();
 document.getElementById('st').textContent=j.state;
 document.getElementById('log').textContent=(j.log||[]).join('\\n');
-if(j.state==='done'){{location.href='/session/'+j.session_id;}}
-else if(j.state==='error'){{document.getElementById('err').textContent=j.error;}}
-else{{setTimeout(poll,1500);}}}}
-window.onload=poll;</script>
-<style>body{{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:40px auto;padding:0 16px}}
-pre{{background:#f4f6f8;padding:10px;border-radius:8px;white-space:pre-wrap}} .err{{color:#c0392b}}</style></head><body>
-<h1>Processing&hellip; <span id="st">queued</span></h1>
-<p>This can take a few minutes (pose estimation + OpenSim). The page will redirect when done.</p>
-<div class="err" id="err"></div><pre id="log"></pre>
-<p><a href="/">&larr; back</a></p></body></html>"""
+if(j.state==='done'){location.href='/session/'+j.session_id;}
+else if(j.state==='error'){document.getElementById('err').textContent=j.error;document.getElementById('st').textContent='error';}
+else{setTimeout(poll,1500);}}
+window.onload=poll;</script>"""
 
 
 def _capabilities() -> dict:
@@ -272,11 +310,11 @@ def create_app(process_fn=None):
 
     @app.get("/process", response_class=HTMLResponse)
     def process_form():
-        return PROCESS_TMPL.format(css=_PAGE_CSS, banner=_status_banner(), capture=CAPTURE_HTML)
+        return _shell("Process video", _process_body(), "process")
 
     @app.get("/setup", response_class=HTMLResponse)
     def setup_page():
-        return SETUP_TMPL.format(css=_PAGE_CSS, banner=_status_banner())
+        return _shell("Setup", _setup_body(), "setup")
 
     @app.post("/process")
     async def process(video: UploadFile, subject: str = Form(""), trial: str = Form(""),
@@ -298,7 +336,7 @@ def create_app(process_fn=None):
     def job_page(jid: str):
         if jm.get(jid) is None:
             return HTMLResponse("<p>Unknown job. <a href='/'>Back</a></p>", status_code=404)
-        return JOB_TMPL.format(jid=jid)
+        return _shell("Processing", _JOB_BODY.replace("__JID__", jid), "process")
 
     @app.get("/api/job/{jid}")
     def api_job(jid: str):
