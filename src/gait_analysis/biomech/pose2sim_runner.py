@@ -1,0 +1,126 @@
+"""Track A: drive Pose2Sim (RTMPose -> triangulation -> OpenSim IK) for accurate mode.
+
+Pose2Sim (BSD-3) already bundles an OpenSim model whose markers match its HALPE_26
+keypoints, plus scale + IK setups, and runs OpenSim scaling/IK for you. We delegate the
+heavy biomechanics to it and keep our analysis/report/signatures layer on top.
+
+This module scaffolds a Pose2Sim project (folders + a starter Config.toml tuned for two
+iPhones) and drives the pipeline steps. The Config.toml is version-sensitive -- start
+from Pose2Sim's bundled demo config and let this fill in the iPhone-specific fields.
+Lazy-imports Pose2Sim; fails loudly if absent. Untestable in the build sandbox (no
+Pose2Sim/OpenSim) beyond config/scaffold generation.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+# Starter config tuned for 2 phones + RTMPose/HALPE_26. Minimal subset; the user should
+# reconcile it with their installed Pose2Sim's demo Config.toml (fields drift by version).
+STARTER_CONFIG = """\
+[project]
+multi_person = false
+participant_height = 1.75
+participant_mass = 70.0
+frame_rate = 'auto'
+
+[pose]
+pose_framework = 'rtmlib'        # RTMPose backend (Apache-2.0; no OpenPose)
+pose_model = 'HALPE_26'          # has feet -> better ankle/foot for gait
+mode = 'balanced'
+det_frequency = 1
+
+[synchronization]
+synchronization_type = 'sound'   # clap sync; or set up OpenCap-app simultaneous capture
+
+[calibration]
+calibration_type = 'calculate'   # ChArUco board; or 'convert' an existing calibration
+
+[triangulation]
+reproj_error_threshold_triangulation = 15
+likelihood_threshold_triangulation = 0.3
+interpolation = 'cubic'
+
+[filtering]
+type = 'butterworth'
+[filtering.butterworth]
+order = 4
+cut_off_frequency = 6
+
+[kinematics]
+use_augmentation = true          # OpenCap-style marker augmenter (improves IK)
+right_left_symmetry = true
+"""
+
+# Pose2Sim project subfolders (per its expected layout).
+SUBDIRS = ["calibration", "videos", "pose", "pose-3d", "kinematics"]
+
+
+def prepare_project(project_dir: str | Path) -> Path:
+    """Create the Pose2Sim folder layout + a starter Config.toml. Runs offline."""
+    project_dir = Path(project_dir)
+    for sub in SUBDIRS:
+        (project_dir / sub).mkdir(parents=True, exist_ok=True)
+    cfg = project_dir / "Config.toml"
+    if not cfg.exists():
+        cfg.write_text(STARTER_CONFIG)
+    return project_dir
+
+
+def _require_pose2sim():
+    try:
+        from Pose2Sim import Pose2Sim  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - environment guard
+        raise SystemExit(
+            "Pose2Sim is not installed. Run:  pip install pose2sim\n"
+            "(BSD-3; brings RTMPose + OpenSim model/setup for accurate mode)"
+        ) from exc
+    from Pose2Sim import Pose2Sim
+    return Pose2Sim
+
+
+def run(project_dir: str | Path) -> Path:
+    """Run the Pose2Sim accurate-mode steps; return the OpenSim IK .mot.
+
+    Expects a prepared project with calibration video(s) + the trial videos in place.
+    """
+    project_dir = Path(project_dir)
+    cfg = project_dir / "Config.toml"
+    if not cfg.exists():
+        raise FileNotFoundError(f"No Config.toml in {project_dir}; call prepare_project first.")
+
+    p2s = _require_pose2sim()
+    p2s.calibration(str(project_dir))
+    p2s.poseEstimation(str(project_dir))
+    p2s.synchronization(str(project_dir))
+    p2s.personAssociation(str(project_dir))
+    p2s.triangulation(str(project_dir))
+    p2s.filtering(str(project_dir))
+    p2s.markerAugmentation(str(project_dir))
+    p2s.kinematics(str(project_dir))   # OpenSim scaling + IK
+
+    mots = sorted((project_dir / "kinematics").glob("*.mot"))
+    if not mots:
+        raise RuntimeError("Pose2Sim finished but no .mot found in kinematics/.")
+    return mots[-1]
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Pose2Sim accurate-mode driver")
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--prepare-only", action="store_true",
+                    help="Just scaffold folders + Config.toml, then stop")
+    args = ap.parse_args(argv)
+
+    prepare_project(args.project)
+    if args.prepare_only:
+        print(f"Prepared project at {args.project}. Add calibration + trial videos, then re-run.")
+        return 0
+    out = run(args.project)
+    print(f"Wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

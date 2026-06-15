@@ -30,12 +30,15 @@ src/gait_analysis/
   biomech/markerset.py          keypoint -> OpenSim marker map + IK weights
   biomech/opensim_setup.py      auto-generate OpenSim IK setup XML from the markerset
   biomech/opensim_ik.py         OpenSim IK -> all joint angles (validates markers; Phase-1b)
+  biomech/marker_placement.py   Track B: where to inject our markers on LaiUhlrich2022
+  biomech/build_marked_model.py Track B: inject named markers into a base .osim
+  biomech/pose2sim_runner.py    Track A: drive Pose2Sim (RTMPose -> triangulation -> IK)
   analysis/spatiotemporal.py    Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
   analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
   analysis/signatures.py        clinical-signature flags (tightness/weakness/neuro/pain) from kinematics
-  pipeline.py                   end-to-end orchestrator  (gait-pipeline CLI; --from-mot runs today)
+  pipeline.py                   orchestrator: --from-mot (now) | --video (quick) | --accurate (2-phone)
   config.py                     COCO-17 layout + defaults
-tests/                          offline synthetic tests (no video/network/OpenSim)  — 19 passing
+tests/                          offline synthetic tests (no video/network/OpenSim)  — 25 passing
 setup/setup_macos.sh            Apple Silicon environment setup
 docs/                           research brief, quickstart, quick-mode 3D, clinical signatures
 ```

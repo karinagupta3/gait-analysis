@@ -67,12 +67,24 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     return result
 
 
+def run_accurate(project_dir: str | Path, gait_speed_m_s: float | None = None) -> dict:
+    """Track A: 2-phone accurate mode via Pose2Sim -> our report. Needs Pose2Sim + OpenSim."""
+    from .biomech import pose2sim_runner
+    print("[1/2] Pose2Sim (calibration -> triangulation -> OpenSim IK) ...")
+    mot = pose2sim_runner.run(project_dir)
+    print("[2/2] Kinematics report + signature flags ...")
+    result = report_from_mot(mot, gait_speed_m_s)
+    result["mot"] = mot
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Gait pipeline: report from .mot, or full quick-mode run.")
+    ap = argparse.ArgumentParser(description="Gait pipeline: report from .mot, quick-mode, or accurate-mode.")
     ap.add_argument("--from-mot", help="Run analysis only on an existing OpenSim .mot")
-    ap.add_argument("--video", help="Quick-mode: input single-phone video")
+    ap.add_argument("--video", help="Quick-mode (1 phone): input video")
     ap.add_argument("--model", help="Quick-mode: full-body .osim with matching markers")
     ap.add_argument("--outdir", default="outputs", help="Quick-mode: output directory")
+    ap.add_argument("--accurate", help="Accurate-mode (2 phones): Pose2Sim project directory")
     ap.add_argument("--speed", type=float, default=None, help="Gait speed (m/s) for context")
     ap.add_argument("--plot", default=None, help="Optional joint-angle PNG (analysis-only mode)")
     args = ap.parse_args(argv)
@@ -80,10 +92,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.from_mot:
         report_from_mot(args.from_mot, args.speed, plot_path=args.plot)
         return 0
+    if args.accurate:
+        run_accurate(args.accurate, args.speed)
+        return 0
     if args.video and args.model:
         run_quick(args.video, args.model, args.outdir, args.speed)
         return 0
-    ap.error("Provide --from-mot <file>, or both --video and --model.")
+    ap.error("Provide --from-mot <file>, --accurate <project>, or both --video and --model.")
     return 2
 
 
