@@ -29,6 +29,7 @@ gait-spatiotemporal = "gait_analysis.analysis.spatiotemporal:main"
 gait-kinematics = "gait_analysis.analysis.kinematics:main"
 gait-signatures = "gait_analysis.analysis.signatures:main"
 gait-ik = "gait_analysis.biomech.opensim_ik:main"
+gait-scale = "gait_analysis.biomech.opensim_ik:main_scale"
 gait-pipeline = "gait_analysis.pipeline:main"
 
 [build-system]

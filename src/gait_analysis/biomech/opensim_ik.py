@@ -22,7 +22,7 @@ import argparse
 from pathlib import Path
 
 from .markerset import validate_against_trc_markers
-from .opensim_setup import write_ik_tool_setup_xml
+from .opensim_setup import write_ik_tool_setup_xml, write_scale_setup_xml
 
 
 def read_trc_marker_names(trc_path: str | Path) -> list[str]:
@@ -85,16 +85,50 @@ def run_ik_from_trc(
     return Path(out_mot)
 
 
-def scale_model(model_path, marker_trc, scale_setup_xml, out_model):
-    """Run OpenSim ScaleTool from a user-provided scale setup XML."""
-    osim = _require_opensim()
-    for p in (model_path, marker_trc, scale_setup_xml):
+def run_scale(
+    model_path: str | Path,
+    static_trc: str | Path,
+    out_model: str | Path,
+    mass_kg: float = 70.0,
+    height_m: float = 1.75,
+    time_range: tuple[float, float] = (0.0, 1.0),
+    setup_out: str | Path | None = None,
+):
+    """Generate a measurement-based ScaleTool setup and size the model to the subject.
+
+    `static_trc` is a short standing/neutral-pose capture. Validates markers first.
+    """
+    for p in (model_path, static_trc):
         if not Path(p).exists():
             raise FileNotFoundError(p)
-    scale_tool = osim.ScaleTool(str(scale_setup_xml))
+    missing = validate_against_trc_markers(read_trc_marker_names(static_trc))
+    if missing:
+        raise ValueError(f"Static TRC missing IK markers: {missing}")
+
+    setup_out = Path(setup_out) if setup_out else Path(out_model).with_suffix(".scale_setup.xml")
+    write_scale_setup_xml(
+        setup_out, model_file=str(model_path), static_trc=str(static_trc),
+        output_model_file=str(out_model), mass_kg=mass_kg, height_m=height_m,
+        time_range=time_range,
+    )
+    osim = _require_opensim()
+    scale_tool = osim.ScaleTool(str(setup_out))
     if not scale_tool.run():
         raise RuntimeError("OpenSim ScaleTool failed.")
     return Path(out_model)
+
+
+def main_scale(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="OpenSim scaling: model + static .trc -> scaled .osim")
+    ap.add_argument("--model", required=True, help="Marked full-body .osim")
+    ap.add_argument("--static", required=True, help="Static-pose .trc")
+    ap.add_argument("--out-model", required=True)
+    ap.add_argument("--mass", type=float, default=70.0, help="Subject mass (kg)")
+    ap.add_argument("--height", type=float, default=1.75, help="Subject height (m)")
+    args = ap.parse_args(argv)
+    out = run_scale(args.model, args.static, args.out_model, args.mass, args.height)
+    print(f"Wrote {out}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

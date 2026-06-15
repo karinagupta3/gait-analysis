@@ -58,6 +58,35 @@ def test_ik_task_set_xml_structure(tmp_path):
         assert float(t.find("weight").text) == IK_MARKER_WEIGHTS[t.get("name")]
 
 
+def test_scale_setup_xml_structure(tmp_path):
+    path = opensim_setup.write_scale_setup_xml(
+        tmp_path / "scale.xml", model_file="m.osim", static_trc="static.trc",
+        output_model_file="scaled.osim", mass_kg=72, height_m=1.8,
+    )
+    root = ET.parse(path).getroot()
+    tool = root.find("ScaleTool")
+    assert tool.find("mass").text == "72"
+    assert tool.find("height").text == "1800"               # m -> mm
+    assert tool.find("GenericModelMaker/model_file").text == "m.osim"
+    # measurement-based scaling with marker pairs from our markerset
+    measurements = root.findall(".//Measurement")
+    names = {m.get("name") for m in measurements}
+    assert {"femur_r", "tibia_l", "torso"} <= names
+    femur = next(m for m in measurements if m.get("name") == "femur_r")
+    assert femur.find(".//markers").text == "right_hip right_knee"
+    # MarkerPlacer reuses the IK task set
+    assert root.find(".//MarkerPlacer/IKTaskSet") is not None
+
+
+def test_run_scale_rejects_bad_static_trc(tmp_path):
+    pos = np.zeros((2, 2, 3), dtype=np.float32)
+    static = write_trc(tmp_path / "s.trc", ["left_hip", "right_hip"], pos, np.arange(2) / 30.0)
+    model = tmp_path / "m.osim"
+    model.write_text("<x/>")
+    with pytest.raises(ValueError, match="missing IK markers"):
+        opensim_ik.run_scale(model, static, tmp_path / "scaled.osim")
+
+
 def test_ik_tool_setup_xml_has_files(tmp_path):
     path = opensim_setup.write_ik_tool_setup_xml(
         tmp_path / "ik.xml", model_file="m.osim", marker_file="m.trc",
