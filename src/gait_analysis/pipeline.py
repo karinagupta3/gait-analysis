@@ -20,7 +20,8 @@ from .analysis import gait_cycle, kinematics, signatures
 
 
 def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
-                    plot_path: str | Path | None = None) -> dict:
+                    plot_path: str | Path | None = None,
+                    html_path: str | Path | None = None) -> dict:
     """Kinematics report + signature flags from an existing OpenSim .mot. Runs now."""
     time, coords, meta = kinematics.read_storage(mot_path)
     summary = kinematics.summarize(time, coords, meta)
@@ -33,6 +34,11 @@ def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
     ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s, phase=phase)
     findings = signatures.detect(summary, ctx)
     print("\n" + signatures.format_findings(findings, ctx))
+
+    if html_path:
+        from .analysis import report
+        out = report.build_html_report(mot_path, html_path, gait_speed_m_s=gait_speed_m_s)
+        print(f"\nWrote HTML report: {out}")
     return {"summary": summary, "findings": findings, "phase": phase}
 
 
@@ -89,10 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--accurate", help="Accurate-mode (2 phones): Pose2Sim project directory")
     ap.add_argument("--speed", type=float, default=None, help="Gait speed (m/s) for context")
     ap.add_argument("--plot", default=None, help="Optional joint-angle PNG (analysis-only mode)")
+    ap.add_argument("--html", default=None, help="Optional self-contained HTML report path")
     args = ap.parse_args(argv)
 
     if args.from_mot:
-        report_from_mot(args.from_mot, args.speed, plot_path=args.plot)
+        report_from_mot(args.from_mot, args.speed, plot_path=args.plot, html_path=args.html)
         return 0
     if args.accurate:
         run_accurate(args.accurate, args.speed)

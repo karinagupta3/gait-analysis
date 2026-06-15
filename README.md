@@ -36,9 +36,11 @@ src/gait_analysis/
   analysis/spatiotemporal.py    Zeni-2008 gait events, cadence, symmetry  (gait-spatiotemporal CLI)
   analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
   analysis/signatures.py        clinical-signature flags (tightness/weakness/neuro/pain) from kinematics
+  analysis/gait_cycle.py        gait-cycle segmentation + phase-windowed features (swing/stance)
+  analysis/report.py            self-contained HTML report (gait-report CLI)
   pipeline.py                   orchestrator: --from-mot (now) | --video (quick) | --accurate (2-phone)
   config.py                     COCO-17 layout + defaults
-tests/                          offline synthetic tests (no video/network/OpenSim)  — 25 passing
+tests/                          offline synthetic tests (no video/network/OpenSim)  — 33 passing
 setup/setup_macos.sh            Apple Silicon environment setup
 docs/                           research brief, quickstart, quick-mode 3D, clinical signatures
 ```
