@@ -22,6 +22,7 @@ az account show >/dev/null 2>&1 || { echo "Not logged in. Run: az login"; exit 1
 
 echo ">> RG=$RG  LOC=$LOC  ACR=$ACR  ENV=$ENVN  APP=$APP"
 az extension add --name containerapp --upgrade --yes >/dev/null 2>&1 || true
+az provider register -n Microsoft.ContainerRegistry --wait >/dev/null 2>&1 || true
 az provider register -n Microsoft.App --wait >/dev/null 2>&1 || true
 az provider register -n Microsoft.OperationalInsights --wait >/dev/null 2>&1 || true
 
