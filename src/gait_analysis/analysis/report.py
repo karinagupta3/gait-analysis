@@ -16,7 +16,7 @@ import html
 import io
 from pathlib import Path
 
-from . import gait_cycle, interpretation, kinematics, normative, signatures, tasks
+from . import gait_cycle, interpretation, kinematics, normative, signatures, tasks, viz3d
 
 # Normative sagittal references (Perry & Burnfield / AAPM&R; see docs/04 Section A).
 # Keyed by coordinate base (strip _r/_l/_beta). Display-only reference strings.
@@ -330,6 +330,8 @@ Generated {(_dt.date.today().isoformat())} &middot; angles in {'deg' if summary[
 <h2>Key metrics &mdash; {html.escape(task_name)}</h2>
 <p class="meta">The measures that matter clinically for this action.</p>
 {_task_panel(task, metrics, phase, summary, trc_path)}
+
+{viz3d.report_section(trc_path) if trc_path else ""}
 
 <h2>Clinical signature flags</h2>
 <p class="meta">Research decision-support, <b>not a diagnosis</b>. Each flag lists multiple
