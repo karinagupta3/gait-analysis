@@ -74,7 +74,9 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
         sc = mesh.get_scale_factors()
         src = next((d / fname for d in search_dirs if (d / fname).exists()), None)
         if src is not None:
-            shutil.copy(src, geo_out / Path(fname).name)
+            dst = geo_out / Path(fname).name
+            if src.resolve() != dst.resolve():            # tolerate --geometry pointing at the output dir
+                shutil.copy(src, dst)
         bodies_geo.setdefault(base.getName(), []).append({
             "file": f"geometry/{Path(fname).name}",
             "found": src is not None,
