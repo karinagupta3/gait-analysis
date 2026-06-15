@@ -16,7 +16,7 @@ import html
 import io
 from pathlib import Path
 
-from . import gait_cycle, kinematics, signatures
+from . import gait_cycle, interpretation, kinematics, signatures, tasks
 
 # Normative sagittal references (Perry & Burnfield / AAPM&R; see docs/04 Section A).
 # Keyed by coordinate base (strip _r/_l/_beta). Display-only reference strings.
@@ -93,13 +93,20 @@ def _flag_cards(findings) -> str:
         color = _CONF_COLOR.get(f.confidence, "#7f8c8d")
         interps = "".join(f"<li>{html.escape(i)}</li>" for i in f.interpretations)
         caveats = "".join(f"<div class='caveat'>{html.escape(c)}</div>" for c in f.caveats)
+        g = interpretation.guidance_for(f.rule_id)
+        gblock = ""
+        if g:
+            gblock = (f"<div class='guide'>"
+                      f"<div><b>What it means:</b> {html.escape(g.meaning)}</div>"
+                      f"<div><b>What helps:</b> {html.escape(g.treatment)}</div>"
+                      f"<div><b>Tracking change:</b> {html.escape(g.tracking)}</div></div>")
         cards.append(f"""
         <div class="card" style="border-left:6px solid {color}">
           <div class="card-h"><span class="conf" style="background:{color}">{f.confidence.upper()}</span>
             {html.escape(f.title)}</div>
           <div class="val"><code>{html.escape(f.coordinate)} = {f.observed}</code>
             &nbsp;<span class="thr">flag: {html.escape(f.threshold)}</span></div>
-          <div class="lbl">Consistent with:</div><ul>{interps}</ul>{caveats}
+          <div class="lbl">Consistent with:</div><ul>{interps}</ul>{caveats}{gblock}
         </div>""")
     return "\n".join(cards)
 
@@ -123,7 +130,7 @@ def build_html_report(mot_path, out_html, gait_speed_m_s=None,
     summary = kinematics.summarize(time, coords, meta)
     phase = gait_cycle.compute_phase_features(time, coords)
     ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s, phase=phase)
-    findings = signatures.detect(summary, ctx)
+    task, findings, _metrics = tasks.route(time, coords, summary, ctx)
 
     n = phase.n_cycles
     conf = ("GOOD" if n >= 3 else "LOW -- short trial, interpret cautiously" if n >= 1
@@ -144,11 +151,14 @@ ul{{margin:4px 0 4px 18px}} .caveat{{font-size:12px;color:#a55;margin-top:4px}}
 th,td{{border:1px solid #eee;padding:4px 8px;text-align:left}} th{{background:#f4f6f8}}
 .ref{{color:#777;font-size:12px}} img{{max-width:100%;border:1px solid #eee;border-radius:8px}}
 .disclaim{{font-size:12px;color:#777;background:#fffbe6;border:1px solid #f0e2a0;border-radius:8px;padding:10px 14px}}
+.guide{{margin-top:8px;padding:8px 10px;background:#eefaf3;border-radius:6px;font-size:13px}}
+.guide div{{margin:3px 0}}
 </style></head><body>
 <h1>{html.escape(title)}</h1>
 <div class="meta">{('Subject: ' + html.escape(subject) + ' &middot; ') if subject else ''}
 Generated {(_dt.date.today().isoformat())} &middot; angles in {'deg' if summary['in_degrees'] else 'rad'}</div>
-<div class="banner"><b>Data confidence:</b> {conf} &nbsp;|&nbsp; gait cycles: {n}
+<div class="banner"><b>Task:</b> {task} &nbsp;|&nbsp; <b>Data confidence:</b> {conf}
+{('&nbsp;|&nbsp; gait cycles: ' + str(n)) if task == 'gait' else ''}
 &nbsp;|&nbsp; frames: {summary['n_frames']} ({summary['duration_s']:.1f}s)
 &nbsp;|&nbsp; gait speed: {speed} &nbsp;|&nbsp; coordinates: {summary['n_coordinates']}</div>
 

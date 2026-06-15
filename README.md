@@ -37,6 +37,8 @@ src/gait_analysis/
   analysis/kinematics.py        OpenSim .mot -> ROM, L/R symmetry, per-coordinate graphs
   analysis/signatures.py        clinical-signature flags (tightness/weakness/neuro/pain) from kinematics
   analysis/gait_cycle.py        gait-cycle segmentation + phase-windowed features (swing/stance)
+  analysis/tasks.py             task-aware analysis: squat + sit-to-stand (auto-detected)
+  analysis/interpretation.py    cited 'what it means / what helps / how to track' per finding
   analysis/report.py            self-contained HTML report (gait-report CLI)
   pipeline.py                   orchestrator: --from-mot (now) | --video (quick) | --accurate (2-phone)
   config.py                     COCO-17 layout + defaults

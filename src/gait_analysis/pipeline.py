@@ -32,7 +32,9 @@ def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
     # Phase-windowed features (swing/stance) -> clinically-correct, less noisy flags.
     phase = gait_cycle.compute_phase_features(time, coords)
     ctx = signatures.Context(gait_speed_m_s=gait_speed_m_s, phase=phase)
-    findings = signatures.detect(summary, ctx)
+    from .analysis import tasks
+    task, findings, _metrics = tasks.route(time, coords, summary, ctx)
+    print(f"\nDetected task: {task}")
     print("\n" + signatures.format_findings(findings, ctx))
 
     if html_path:
