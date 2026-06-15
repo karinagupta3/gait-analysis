@@ -124,30 +124,46 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
 
 _VIEWER_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>OpenSim model playback</title>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script>
+// Classic script (runs first): surface ANY failure on the page so it's never a silent black screen.
+window.__say=function(m,bg){var d=document.getElementById('msg');if(!d){d=document.createElement('div');d.id='msg';
+ d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9;font:12px/1.4 monospace;padding:8px;white-space:pre-wrap;color:#fff';
+ (document.body||document.documentElement).appendChild(d);} d.style.background=bg||'#7f1d1d'; d.textContent=m;};
+addEventListener('error',function(e){window.__say('JS ERROR: '+(e.message||e.filename||e)+(e.lineno?(' (line '+e.lineno+')'):''));});
+addEventListener('unhandledrejection',function(e){window.__say('PROMISE ERROR: '+((e.reason&&e.reason.message)||e.reason));});
+</script>
 <style>body{margin:0;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
 #bar{position:fixed;bottom:0;left:0;right:0;padding:10px;background:#0e1116cc;display:flex;gap:10px;align-items:center}
 button{background:#2a9d8f;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer}
-input[type=range]{flex:1}</style></head><body>
-<div id="bar"><button id="play">&#10073;&#10073;</button><input id="scrub" type="range" min="0" value="0"><span id="t"></span></div>
+input[type=range]{flex:1}#stat{font:12px monospace;color:#9ecbff;white-space:nowrap}</style></head><body>
+<div id="bar"><button id="play">&#10073;&#10073;</button><input id="scrub" type="range" min="0" value="0"><span id="t"></span><span id="stat"></span></div>
 <script type="module">
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
 const S = __SCENE__;
-const scene=new THREE.Scene();
-const cam=new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 100); cam.position.set(2.2,1.2,2.2);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x12161d);   // visibly not pure black if WebGL renders
+const cam=new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 100);
 const r=new THREE.WebGLRenderer({antialias:true}); r.setSize(innerWidth,innerHeight); document.body.appendChild(r.domElement);
-const ctrl=new OrbitControls(cam,r.domElement); ctrl.target.set(0,0.9,0);
-scene.add(new THREE.HemisphereLight(0xffffff,0x223,1.1));
-const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(2,4,3); scene.add(dl);
-scene.add(new THREE.GridHelper(4,16,0x334155,0x1f2937));
+const ctrl=new OrbitControls(cam,r.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x223,1.2));
+const dl=new THREE.DirectionalLight(0xffffff,0.8); dl.position.set(2,4,3); scene.add(dl);
+scene.add(new THREE.GridHelper(4,16,0x55617a,0x333c52));
+// Aim the camera at the model's actual location at frame 0 (so it can't be off-screen).
+let cx=0,cy=0.9,cz=0,nb=0; const f0=S.frames[0]||{};
+for(const k in f0){cx+=f0[k][0]; cy+=f0[k][1]; cz+=f0[k][2]; nb++;}
+if(nb){cx/=nb; cy/=nb; cz/=nb;} ctrl.target.set(cx,cy,cz); cam.position.set(cx+2.2,cy+1.0,cz+2.2);
 const mat=new THREE.MeshLambertMaterial({color:0xe8e2d6});
-const groups={}; const loader=new VTKLoader();
+const groups={}, loader=new VTKLoader(); let want=0,got=0,fail=0;
+const stat=document.getElementById('stat');
+function status(){stat.textContent='bodies '+S.bodies.length+' · frames '+S.frames.length+' · meshes '+got+'/'+want+(fail?(' · FAILED '+fail):'');}
 for(const b of S.bodies){const g=new THREE.Group(); groups[b.name]=g; scene.add(g);
-  for(const m of b.meshes){ if(!m.found) continue;
+  for(const m of b.meshes){ if(!m.found) continue; want++;
     loader.load(m.file, geom=>{geom.computeVertexNormals(); const mesh=new THREE.Mesh(geom,mat);
-      mesh.scale.set(...m.scale); mesh.position.set(...m.offset_pos);
-      mesh.quaternion.set(...m.offset_quat); g.add(mesh);}); } }
+      mesh.scale.set(...m.scale); mesh.position.set(...m.offset_pos); mesh.quaternion.set(...m.offset_quat); g.add(mesh); got++; status();},
+      undefined,
+      err=>{fail++; status(); window.__say('Mesh parse failed: '+m.file+' -- VTKLoader cannot read this .vtp ('+((err&&err.message)||err)+')');}); } }
+status();
 let f=0, playing=true, last=0;
 const scrub=document.getElementById('scrub'), play=document.getElementById('play'), tlab=document.getElementById('t');
 scrub.max=S.frames.length-1;
