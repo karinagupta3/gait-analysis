@@ -20,7 +20,9 @@ Status: ✅ done · 🟡 in progress · ⬜ todo. This is the working backlog; u
 - ✅ C1. Task detection (gait / squat / sit-to-stand)
 - ✅ C2. Task-specific metric panels (each action shows what matters clinically)
 - ✅ C3. Gait-cycle-normalized ensemble curves (mean ± SD across strides) + normal band
-- ⬜ C4. **Full spatiotemporal from the `.trc`**: step/stride length (metric), stance/swing %, double-support, step width, symmetry
+- ✅ C4. **Full spatiotemporal from the `.trc`**: walking speed, stride length (metric), stance/swing %, step width, symmetry (`spatiotemporal_3d.py`)
+- ✅ C10. **OpenSim visuals — layer 1**: animated 3D motion playback in the report from the marker `.trc` (`viz3d.py`, three.js)
+- ⬜ C11. **OpenSim visuals — layer 2**: render the full musculoskeletal **model geometry** (bones/muscles) driven by the `.mot` (export body transforms via the OpenSim API + load mesh geometry into the same three.js viewer)
 - ⬜ C5. Squat depth: descent vs ascent split, depth-over-time, true frontal-plane valgus angle
 - ⬜ C6. Sit-to-stand: triple-extension coordination timing, trunk-flexion momentum
 - ⬜ C7. Summary indices: GDI / GPS (gait), composite squat/STS scores
@@ -28,14 +30,13 @@ Status: ✅ done · 🟡 in progress · ⬜ todo. This is the working backlog; u
 - ⬜ C9. Population-matched normative database (replace the approximate band)
 
 ## D. Deep clinical research & grounding  *(non-superficial — the "why")*
-- 🟡 D1. Per-action clinical literature: what each metric means, normative values, MCID, validity vs gold standard (docs/01–05 started; expand to a referenced doc/10)
-- ⬜ D2. **Patient & clinic use-cases**: which conditions (ACL/PFP, post-stroke, TKA/THA rehab, cerebral palsy, falls/aging, Parkinson's), what *decision* each measure informs, how it tracks outcomes
-- ⬜ D3. Validity evidence: markerless vs marker-based / OpenCap concurrent validity per joint & plane (cite the numbers we hold ourselves to)
+- ✅ D1+D2+D3. **Clinical evidence base** (`docs/11-clinical-evidence.md`, 50 refs): use-cases by condition (ACL/PFP, OA/TKA/THA, stroke, CP, Parkinson's, falls/aging, amputee), metric-by-metric reference values + MCIDs, and markerless validity per joint & plane (the numbers we hold ourselves to)
 - ⬜ D4. Data & regulatory: research-use framing, consent/PHI, the line where it becomes clinical (BAA, etc.)
 
 ## E. UI / UX
 - ⬜ E1. **Clear capture instructions** for users: camera placement, distance, height, lighting, framing, clothing, calibration object, walkway length, # of reps
-- ⬜ E2. **"Adding OpenSim"** — setup/onboarding: install OpenSim + the conda `gait` env, set `GAIT_OSIM_MODEL`, troubleshooting; in-app status when OpenSim isn't found
+- ✅ E2a. OpenSim *onboarding* (install/setup page + capability banner) — `/setup`, docs/10
+- 🟡 E2b. **OpenSim *visuals*** (what "adding OpenSim" actually meant): 3D model in the report. Layer 1 done (C10); full model geometry is C11.
 - 🟡 E3. Session / subject management UI (sessions list + report viewer exist; add subjects, visits, delete)
 - 🟡 E4. Report polish (task panels in; keep refining wording, references, layout)
 
