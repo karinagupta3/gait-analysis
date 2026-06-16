@@ -34,7 +34,26 @@ echo ">> [2/4] build image in ACR (uses the repo Dockerfile)"
 az acr build -r "$ACR" -t gait-web:latest .
 
 echo ">> [3/4] Container Apps environment"
+# A prior failed run can leave the env half-provisioned; recreate it if so.
+state="$(az containerapp env show -n "$ENVN" -g "$RG" --query properties.provisioningState -o tsv 2>/dev/null || echo '')"
+if [ "$state" = "Failed" ] || [ "$state" = "Canceled" ]; then
+  echo ">> existing environment is '$state'; deleting and recreating ..."
+  az containerapp env delete -n "$ENVN" -g "$RG" --yes -o none 2>/dev/null || true
+fi
 az containerapp env create -n "$ENVN" -g "$RG" -l "$LOC" -o none 2>/dev/null || true
+
+# Provisioning is async -- wait until the environment is actually ready before creating the app.
+echo ">> waiting for the environment to finish provisioning (can take a few minutes) ..."
+for i in $(seq 1 60); do
+  state="$(az containerapp env show -n "$ENVN" -g "$RG" --query properties.provisioningState -o tsv 2>/dev/null || echo '')"
+  echo "   env state: ${state:-<creating>}"
+  case "$state" in
+    Succeeded) break ;;
+    Failed|Canceled) echo "Environment provisioning $state. Re-run the script."; exit 1 ;;
+  esac
+  sleep 10
+done
+[ "$state" = "Succeeded" ] || { echo "Timed out waiting for the environment. Re-run the script."; exit 1; }
 
 echo ">> [4/4] deploy / update the app"
 if az containerapp show -n "$APP" -g "$RG" >/dev/null 2>&1; then
