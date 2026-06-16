@@ -1,0 +1,24 @@
+# Keep the ACR build context small — the image installs deps from requirements.txt
+# and downloads the pose model itself.
+.venv/
+venv/
+env/
+.git/
+__pycache__/
+**/__pycache__/
+*.pyc
+models/
+data/
+outputs/
+*.mov
+*.mp4
+*.npz
+*.trc
+*.mot
+*.osim
+*.task
+*.onnx
+.rtmlib/
+src/gait_analysis/web/_data/
+tests/
+docs/

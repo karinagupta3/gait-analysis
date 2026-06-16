@@ -4,3 +4,6 @@ python-multipart>=0.0.9
 numpy>=1.24
 scipy>=1.10
 matplotlib>=3.7
+# Single-phone 2D screening (pose extraction). mediapipe pulls its own opencv (needs
+# libgl1/libglib2.0-0 system libs, installed in the Dockerfile).
+mediapipe>=0.10
