@@ -170,7 +170,9 @@ def _process_body() -> str:
             f'<div><label>Trial label</label><input name="trial" placeholder="e.g. squats"></div></div>'
             f'<label>Task hint (optional)</label><input name="trial_hint" placeholder="walking | squat | sit-to-stand">'
             f'<label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01">'
-            f'<label>Mode</label><select name="mode"><option value="quick">quick (1 phone)</option></select>'
+            f'<label>Mode</label><select name="mode">'
+            f'<option value="screening">2D screening (1 phone, side view)</option>'
+            f'<option value="quick">3D quick (needs OpenSim model)</option></select>'
             f'<label>Video</label><input name="video" type="file" accept="video/*" required>'
             f'<button class="btn" type="submit">Upload &amp; process</button></form></div>')
 
@@ -237,9 +239,20 @@ def _status_banner() -> str:
 
 def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
     """Real quick-mode processing: video -> MediaPipe 3D -> OpenSim IK -> .mot -> report."""
-    job.log.append(f"mode={meta.get('mode')}: starting")
-    if meta.get("mode") != "quick":
-        raise RuntimeError("Only quick (1-phone) mode is wired into the app; "
+    mode = meta.get("mode") or "screening"
+    job.log.append(f"mode={mode}: starting")
+
+    # Single-phone 2D sagittal screening: no OpenSim/model needed.
+    if mode == "screening":
+        from ..pipeline import run_screening
+        job.log.append("MediaPipe pose -> 2D sagittal screening ...")
+        result = run_screening(video_path, sdir, subject=meta.get("subject") or "")
+        (sdir / "report.html").write_text(Path(result["report"]).read_text())  # serve via /session
+        (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
+        return sdir.name
+
+    if mode != "quick":
+        raise RuntimeError("Only screening (2D) and quick (3D) modes are wired into the app; "
                            "use the CLI for accurate 2-phone (Pose2Sim) capture.")
     model = os.environ.get("GAIT_OSIM_MODEL")
     if not model:
