@@ -85,6 +85,30 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     return result
 
 
+def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> dict:
+    """Single-phone 2D SAGITTAL screening: video -> pose -> sagittal angles -> report.
+
+    No depth, no scaling, no OpenSim. Needs only mediapipe + a side-view video.
+    Returns the angle summary and writes a self-contained HTML screening report.
+    """
+    import numpy as np
+    from .pose import mediapipe3d
+    from .analysis import sagittal2d, screening_report
+
+    video, outdir = Path(video), Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    print("[1/3] MediaPipe pose ...")
+    d = mediapipe3d.extract_world_landmarks(video)
+    np.savez_compressed(outdir / "pose.npz", **d)
+    print("[2/3] Sagittal angles ...")
+    angles = sagittal2d.compute_sagittal_angles(
+        d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]))
+    print("[3/3] Screening report ...")
+    report_path = screening_report.build_screening_report(
+        angles, outdir / "screening_report.html", subject=subject)
+    return {"mode": "screening", "angles": angles, "report": str(report_path)}
+
+
 def run_accurate(project_dir: str | Path, gait_speed_m_s: float | None = None) -> dict:
     """Track A: 2-phone accurate mode via Pose2Sim -> our report. Needs Pose2Sim + OpenSim."""
     from .biomech import pose2sim_runner
