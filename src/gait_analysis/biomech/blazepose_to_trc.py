@@ -83,8 +83,39 @@ def write_trc(
     return path
 
 
+def _fill_gaps(world: np.ndarray) -> np.ndarray:
+    """Trim no-detection lead-in/out and linearly interpolate interior gaps.
+
+    OpenSim's TRC reader trims trailing empty columns, so rows that end in a missing
+    marker lose a column and IK fails. Gap-filling (standard mocap practice) removes all
+    NaNs: drop frames where <half the markers are present, then interpolate per marker/axis.
+    """
+    T, M, _ = world.shape
+    present = np.isfinite(world).all(axis=2)            # (T, M)
+    valid_frame = present.sum(axis=1) >= (M // 2)
+    if not valid_frame.any():
+        return world
+    lo = int(np.argmax(valid_frame))
+    hi = T - int(np.argmax(valid_frame[::-1]))
+    out = world[lo:hi].copy()
+    n = out.shape[0]
+    idx = np.arange(n)
+    for m in range(M):
+        for a in range(3):
+            col = out[:, m, a]
+            ok = np.isfinite(col)
+            if ok.sum() >= 2:
+                col[~ok] = np.interp(idx[~ok], idx[ok], col[ok])
+            elif ok.sum() == 1:
+                col[~ok] = col[ok][0]
+            else:
+                col[:] = 0.0
+            out[:, m, a] = col
+    return out
+
+
 def npz_to_trc(npz_path: str | Path, out_trc: str | Path, min_visibility: float = 0.3):
-    """Load a mediapipe3d .npz and write a .trc with axis remap + low-conf masking."""
+    """Load a mediapipe3d .npz and write a .trc with axis remap, low-conf masking, gap-fill."""
     data = np.load(npz_path)
     world = data["world_landmarks"].astype(float)   # (T,33,3)
     vis = data["visibility"].astype(float)           # (T,33)
@@ -92,6 +123,7 @@ def npz_to_trc(npz_path: str | Path, out_trc: str | Path, min_visibility: float 
 
     world = remap_axes(world)
     world[vis < min_visibility] = np.nan             # blank low-confidence markers
+    world = _fill_gaps(world)                         # trim + interpolate -> no NaNs for OpenSim
     times = np.arange(world.shape[0]) / fps
     return write_trc(out_trc, list(BLAZEPOSE_33), world.astype(np.float32), times)
 

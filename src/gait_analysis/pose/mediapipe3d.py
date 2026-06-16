@@ -20,10 +20,40 @@ Output .npz:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
+
+# Google's pose-landmarker Task models (Tasks API). Heavy = most accurate.
+_TASK_MODELS = {
+    0: "pose_landmarker_lite.task",
+    1: "pose_landmarker_full.task",
+    2: "pose_landmarker_heavy.task",
+}
+_TASK_BASE_URL = (
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "{stem}/float16/latest/{file}"
+)
+
+
+def _resolve_task_model(model_complexity: int) -> str:
+    """Locate the pose-landmarker .task file (env override, then repo models/, then cache)."""
+    env = os.environ.get("GAIT_POSE_TASK_MODEL")
+    if env and Path(env).exists():
+        return env
+    fname = _TASK_MODELS.get(model_complexity, _TASK_MODELS[2])
+    here = Path(__file__).resolve().parents[3]  # repo root (src/gait_analysis/pose -> repo)
+    for cand in (here / "models" / fname, Path.home() / ".cache" / "gait" / fname):
+        if cand.exists():
+            return str(cand)
+    stem = fname.replace(".task", "")
+    raise SystemExit(
+        f"Pose model '{fname}' not found. Download it once, e.g.:\n"
+        f"  curl -L -o models/{fname} {_TASK_BASE_URL.format(stem=stem, file=fname)}\n"
+        f"or set GAIT_POSE_TASK_MODEL to its path."
+    )
 
 # BlazePose 33-landmark names (index order), per the MediaPipe Pose spec.
 BLAZEPOSE_33 = [
@@ -41,6 +71,12 @@ N_LM = len(BLAZEPOSE_33)
 
 
 def _load_pose(model_complexity: int = 2, min_conf: float = 0.5):
+    """Create a PoseLandmarker (mediapipe Tasks API, VIDEO mode).
+
+    The legacy `mp.solutions.pose` API was removed from current mediapipe wheels, so we
+    use the Tasks API with a downloaded .task model. Output landmarks are the same
+    BlazePose-33 set, so the rest of the pipeline is unchanged.
+    """
     try:
         import mediapipe as mp
     except ImportError as exc:  # pragma: no cover - environment guard
@@ -48,13 +84,15 @@ def _load_pose(model_complexity: int = 2, min_conf: float = 0.5):
             "mediapipe is not installed. Run:  pip install mediapipe\n"
             "(quick-mode 3D; Apache-2.0, commercial-use-OK)"
         ) from exc
-    return mp.solutions.pose.Pose(
-        static_image_mode=False,
-        model_complexity=model_complexity,  # 2 = 'heavy', most accurate
-        enable_segmentation=False,
-        min_detection_confidence=min_conf,
+    task_path = _resolve_task_model(model_complexity)
+    options = mp.tasks.vision.PoseLandmarkerOptions(
+        base_options=mp.tasks.BaseOptions(model_asset_path=task_path),
+        running_mode=mp.tasks.vision.RunningMode.VIDEO,
+        num_poses=1,
+        min_pose_detection_confidence=min_conf,
         min_tracking_confidence=min_conf,
     )
+    return mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
 
 def extract_world_landmarks(
@@ -65,6 +103,7 @@ def extract_world_landmarks(
 ):
     """Run MediaPipe Pose over a video; return per-frame 3D world landmarks."""
     import cv2
+    import mediapipe as mp
 
     video_path = Path(video_path)
     if not video_path.exists():
@@ -78,14 +117,12 @@ def extract_world_landmarks(
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps_safe = fps or 30.0
 
     writer = None
     if overlay_path is not None:
-        import mediapipe as mp
-        mp_draw = mp.solutions.drawing_utils
-        mp_pose = mp.solutions.pose
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(overlay_path), fourcc, fps or 30.0, (width, height))
+        writer = cv2.VideoWriter(str(overlay_path), fourcc, fps_safe, (width, height))
 
     world_seq, vis_seq, img_seq = [], [], []
     n_detected = 0
@@ -99,22 +136,24 @@ def extract_world_landmarks(
             break
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result = pose.process(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        timestamp_ms = int(frame_idx * 1000.0 / fps_safe)
+        result = pose.detect_for_video(mp_image, timestamp_ms)
 
-        if result.pose_world_landmarks is None:
+        if not result.pose_world_landmarks:
             world_seq.append(np.full((N_LM, 3), np.nan, dtype=np.float32))
             vis_seq.append(np.zeros((N_LM,), dtype=np.float32))
             img_seq.append(np.full((N_LM, 2), np.nan, dtype=np.float32))
         else:
-            wl = result.pose_world_landmarks.landmark
+            wl = result.pose_world_landmarks[0]
             world_seq.append(np.array([[p.x, p.y, p.z] for p in wl], dtype=np.float32))
             vis_seq.append(np.array([p.visibility for p in wl], dtype=np.float32))
-            il = result.pose_landmarks.landmark
+            il = result.pose_landmarks[0]
             img_seq.append(np.array([[p.x, p.y] for p in il], dtype=np.float32))
             n_detected += 1
             if writer is not None:
-                mp_draw.draw_landmarks(frame, result.pose_landmarks,
-                                       mp_pose.POSE_CONNECTIONS)
+                for p in il:
+                    cv2.circle(frame, (int(p.x * width), int(p.y * height)), 3, (0, 255, 0), -1)
 
         if writer is not None:
             writer.write(frame)
