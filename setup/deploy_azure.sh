@@ -27,7 +27,13 @@ az provider register -n Microsoft.App --wait >/dev/null 2>&1 || true
 az provider register -n Microsoft.OperationalInsights --wait >/dev/null 2>&1 || true
 
 echo ">> [1/4] resource group + container registry"
-az group create -n "$RG" -l "$LOC" -o none
+# Reuse the resource group's existing region if it already exists (avoids location clashes).
+rg_loc="$(az group show -n "$RG" --query location -o tsv 2>/dev/null || echo '')"
+if [ -n "$rg_loc" ]; then
+  LOC="$rg_loc"; echo ">> resource group already in '$LOC' -- using that location"
+else
+  az group create -n "$RG" -l "$LOC" -o none
+fi
 az acr create -n "$ACR" -g "$RG" --sku Basic --admin-enabled true -o none
 
 echo ">> [2/4] build image in ACR (uses the repo Dockerfile)"
