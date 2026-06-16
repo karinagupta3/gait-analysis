@@ -8,12 +8,24 @@ testable offline.
 
 from __future__ import annotations
 
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from .markerset import IK_MARKER_WEIGHTS
 
 OPENSIM_DOC_VERSION = "40000"  # OpenSim 4.x document version
+
+
+def _rel_to(setup_path: str | Path, target: str) -> str:
+    """Path of `target` relative to the setup file's directory.
+
+    OpenSim's ScaleTool (ModelScaler/MarkerPlacer) resolves marker/output paths
+    relative to the setup-file directory and doubles absolute paths
+    (e.g. ``/tmp//tmp/walk.trc``), so we emit setup-relative paths.
+    """
+    setup_dir = Path(setup_path).resolve().parent
+    return os.path.relpath(Path(target).resolve(), setup_dir)
 
 # Scaling measurements: each scales body segment(s) from the distance between a pair of
 # OUR markers (joint-centre markers from blazepose_to_trc / markerset). Bilateral and
@@ -142,17 +154,17 @@ def write_scale_setup_xml(
     ET.SubElement(scaler, "apply").text = "true"
     ET.SubElement(scaler, "scaling_order").text = "measurements"
     scaler.append(build_measurement_set(measurements))
-    ET.SubElement(scaler, "marker_file").text = str(static_trc)
+    ET.SubElement(scaler, "marker_file").text = _rel_to(path, static_trc)
     ET.SubElement(scaler, "time_range").text = f"{time_range[0]:g} {time_range[1]:g}"
     ET.SubElement(scaler, "preserve_mass_distribution").text = "true"
-    ET.SubElement(scaler, "output_model_file").text = str(output_model_file)
+    ET.SubElement(scaler, "output_model_file").text = _rel_to(path, output_model_file)
 
     placer = ET.SubElement(tool, "MarkerPlacer")
     ET.SubElement(placer, "apply").text = "true"
     placer.append(build_ik_task_set(weights))
-    ET.SubElement(placer, "marker_file").text = str(static_trc)
+    ET.SubElement(placer, "marker_file").text = _rel_to(path, static_trc)
     ET.SubElement(placer, "time_range").text = f"{time_range[0]:g} {time_range[1]:g}"
-    ET.SubElement(placer, "output_model_file").text = str(output_model_file)
+    ET.SubElement(placer, "output_model_file").text = _rel_to(path, output_model_file)
     ET.SubElement(placer, "output_motion_file").text = ""
 
     _indent(doc)
