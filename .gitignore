@@ -19,6 +19,8 @@ data/
 *.osim
 *.sto
 *.mot
+*.task
+models/
 outputs/
 *.onnx
 .rtmlib/
