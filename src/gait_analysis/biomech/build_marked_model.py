@@ -19,8 +19,10 @@ from .marker_placement import PLACEMENTS, validate
 
 # Joint names vary between LaiUhlrich/Rajagopal variants; try aliases before falling back.
 JOINT_ALIASES = {
-    "knee_r": ["knee_r", "walking_knee_r"],
-    "knee_l": ["knee_l", "walking_knee_l"],
+    # LaiUhlrich2022 names the tibiofemoral joint "walker_knee_*"; older Rajagopal
+    # variants use "walking_knee_*". Try both plus the plain name.
+    "knee_r": ["knee_r", "walker_knee_r", "walking_knee_r"],
+    "knee_l": ["knee_l", "walker_knee_l", "walking_knee_l"],
     "acromial_r": ["acromial_r", "shoulder_r", "GlenoHumeral_r"],
     "acromial_l": ["acromial_l", "shoulder_l", "GlenoHumeral_l"],
 }
@@ -38,25 +40,24 @@ def _require_opensim():
     return opensim
 
 
-def _joint_location_in_body(model, osim, joint_name: str, body_name: str):
-    """Best-effort: return the joint's offset-frame translation expressed on `body`.
+def _joint_location_in_body(model, osim, state, joint_name: str, target_body):
+    """Return the joint centre expressed in `target_body`'s frame, or None.
 
-    Returns an osim.Vec3, or None if it can't be resolved (caller falls back).
+    The joint centre is where the parent/child frames coincide at the default pose, so we
+    take the joint's child-frame origin and express it in the target body via OpenSim's
+    frame math. (The earlier approach read a PhysicalOffsetFrame's raw translation, which
+    is 0 whenever the offset lives on the opposite frame -- that put every marker at the
+    body origin.) `state` must already be realized to Position.
     """
     try:
         joint = model.getJointSet().get(joint_name)
     except Exception:
         return None
-    # A Joint has two PhysicalOffsetFrames (parent/child); pick the one based on `body`.
-    for getter in ("getParentFrame", "getChildFrame"):
-        try:
-            frame = getattr(joint, getter)()
-            base = frame.findBaseFrame().getName()
-            if base == body_name:
-                return frame.get_translation()
-        except Exception:
-            continue
-    return None
+    try:
+        child = joint.getChildFrame()
+        return child.findStationLocationInAnotherFrame(state, osim.Vec3(0, 0, 0), target_body)
+    except Exception:
+        return None
 
 
 def build(base_model_path: str | Path, out_model_path: str | Path) -> Path:
@@ -70,10 +71,15 @@ def build(base_model_path: str | Path, out_model_path: str | Path) -> Path:
 
     osim = _require_opensim()
     model = osim.Model(str(base_model_path))
-    model.initSystem()
+    state = model.initSystem()
+    model.realizePosition(state)
     bodyset = model.getBodySet()
 
-    added, fellback = [], []
+    # Pass 1: resolve every marker location FIRST, against the clean realized state.
+    # (addMarker() mutates the model and invalidates `state`, so we must not add markers
+    # while still resolving joint centres -- doing so left every marker after the first
+    # at the body origin.)
+    resolved = []  # (marker_name, body, osim.Vec3, fell_back)
     for p in PLACEMENTS:
         try:
             body = bodyset.get(p.body)
@@ -86,20 +92,24 @@ def build(base_model_path: str | Path, out_model_path: str | Path) -> Path:
         loc = None
         if p.at_joint:
             for jname in JOINT_ALIASES.get(p.at_joint, [p.at_joint]):
-                loc = _joint_location_in_body(model, osim, jname, p.body)
+                loc = _joint_location_in_body(model, osim, state, jname, body)
                 if loc is not None:
                     break
         if loc is None:
-            loc = osim.Vec3(*p.offset)
-            fellback.append(p.marker)
+            resolved.append((p.marker, body, osim.Vec3(*p.offset), True))
         else:
-            loc = osim.Vec3(loc.get(0) + p.offset[0],
-                            loc.get(1) + p.offset[1],
-                            loc.get(2) + p.offset[2])
+            resolved.append((p.marker, body, osim.Vec3(
+                loc.get(0) + p.offset[0],
+                loc.get(1) + p.offset[1],
+                loc.get(2) + p.offset[2]), False))
 
-        marker = osim.Marker(p.marker, body, loc)
-        model.addMarker(marker)
-        added.append(p.marker)
+    # Pass 2: now add the markers (mutates the model).
+    added, fellback = [], []
+    for marker_name, body, loc, fell_back in resolved:
+        model.addMarker(osim.Marker(marker_name, body, loc))
+        added.append(marker_name)
+        if fell_back:
+            fellback.append(marker_name)
 
     model.finalizeConnections()
     out_model_path.parent.mkdir(parents=True, exist_ok=True)
