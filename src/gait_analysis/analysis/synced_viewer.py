@@ -180,17 +180,29 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
 const KP=__KP__, S=__SCENE__, MODE=__MODE__, vid=document.getElementById('vid');
 document.getElementById('rkind').textContent = MODE==='model'?'(musculoskeletal model)':MODE==='markers'?'(marker skeleton)':'(no 3D)';
-// ---- left: 2D overlay on canvas, scaled to displayed video size ----
+// ---- left: 2D overlay on canvas, mapped to the ACTUAL displayed video rect ----
+// The browser may letterbox the video inside the <video> box (object-fit) and uses
+// the video's post-rotation intrinsic size. We map keypoints (in KP.w x KP.h space)
+// into the real content rectangle so the skeleton lands ON the person, not above/
+// beside them. We also warn if the extracted aspect ratio disagrees with what the
+// browser is showing (a sign the source had a rotation flag handled differently).
 const ov=document.getElementById('ov'), cx=ov.getContext('2d');
 function fit(){ov.width=vid.clientWidth; ov.height=vid.clientHeight;}
 vid.addEventListener('loadedmetadata',fit); addEventListener('resize',fit);
 function frameOf(fps,n){return Math.min(Math.max(0,Math.round(vid.currentTime*fps)), n-1);}
-function draw2d(){const sx=ov.width/KP.w, sy=ov.height/KP.h; cx.clearRect(0,0,ov.width,ov.height);
+function rect(){
+  // object-fit:contain — the video content centered inside the element box.
+  const vw=vid.videoWidth||KP.w, vh=vid.videoHeight||KP.h;
+  const cw=ov.width, ch=ov.height, s=Math.min(cw/vw, ch/vh);
+  const dw=vw*s, dh=vh*s;
+  return {ox:(cw-dw)/2, oy:(ch-dh)/2, sx:dw/KP.w, sy:dh/KP.h};
+}
+function draw2d(){const r=rect(); cx.clearRect(0,0,ov.width,ov.height);
   const fr=KP.frames[frameOf(KP.fps,KP.frames.length)]||[];
   cx.strokeStyle='#9ecbff'; cx.lineWidth=2;
   for(const [i,j] of KP.links){const a=fr[i],b=fr[j]; if(!a||!b)continue;
-    cx.beginPath(); cx.moveTo(a[0]*sx,a[1]*sy); cx.lineTo(b[0]*sx,b[1]*sy); cx.stroke();}
-  cx.fillStyle='#2dd4bf'; for(const p of fr){if(!p)continue; cx.beginPath(); cx.arc(p[0]*sx,p[1]*sy,3.5,0,7); cx.fill();}}
+    cx.beginPath(); cx.moveTo(r.ox+a[0]*r.sx,r.oy+a[1]*r.sy); cx.lineTo(r.ox+b[0]*r.sx,r.oy+b[1]*r.sy); cx.stroke();}
+  cx.fillStyle='#2dd4bf'; for(const p of fr){if(!p)continue; cx.beginPath(); cx.arc(r.ox+p[0]*r.sx,r.oy+p[1]*r.sy,3.5,0,7); cx.fill();}}
 // ---- right: three.js scene driven by the same video time ----
 let render3d=()=>{};
 if(S){const el=document.getElementById('viz'),W=el.clientWidth,H=el.clientHeight||500;

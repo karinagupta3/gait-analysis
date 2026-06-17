@@ -114,16 +114,23 @@ def extract_world_landmarks(
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {video_path}")
 
+    # Phone videos store a rotation flag (the sensor shoots landscape, the file is
+    # tagged "rotate 90/180/270"). Without applying it, OpenCV hands MediaPipe a
+    # SIDEWAYS frame: pose detection degrades AND the overlay ends up in a different
+    # orientation than the upright video the browser shows (markers "above" the
+    # person). Ask the backend to auto-apply the rotation so frames come out upright.
+    try:
+        cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1.0)
+    except Exception:  # pragma: no cover - backend without the flag
+        pass
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps_safe = fps or 30.0
+    # True (post-rotation) dimensions come from the first decoded frame, not the
+    # container metadata (which may report the pre-rotation size).
+    width = height = None
 
     writer = None
-    if overlay_path is not None:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(overlay_path), fourcc, fps_safe, (width, height))
-
     world_seq, vis_seq, img_seq = [], [], []
     n_detected = 0
     frame_idx = 0
@@ -134,6 +141,11 @@ def extract_world_landmarks(
             break
         if max_frames is not None and frame_idx >= max_frames:
             break
+        if width is None:
+            height, width = frame.shape[:2]
+            if overlay_path is not None:
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(str(overlay_path), fourcc, fps_safe, (width, height))
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)

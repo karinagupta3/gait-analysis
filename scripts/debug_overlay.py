@@ -70,6 +70,8 @@ def main():
         picks["invalid"] = int(inv_idx[len(inv_idx) // 2])
 
     cap = cv2.VideoCapture(video)
+    try: cap.set(cv2.CAP_PROP_ORIENTATION_AUTO,1.0)
+    except Exception: pass
     for tag, fidx in picks.items():
         cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
         ok, frame = cap.read()
