@@ -352,16 +352,26 @@ def _samples_body() -> str:
             f'<div class="slist">{cards}</div>')
 
 
-_RECORD_BODY = """<section class="hero"><h1>Record with your phone</h1>
-<p class="lead">Open this page ON the phone, frame the whole body from the side, then Record &rarr; Stop.
-The clip uploads and processes automatically &mdash; no files to manage.</p></section>
-<div class="banner" style="background:#f0f9ff;border-color:#bae6fd">
-<b>Before you record</b>Stand the phone ~3&ndash;4 m back, landscape, lens at hip height; keep the whole
-body (head to feet) in frame for the entire walk; film the SIDE view; 4&ndash;6 strides.</div>
+_RECORD_TMPL = """<section class="hero"><h1>Record</h1>
+<p class="lead">Pick the movement, choose orientation, frame the whole body, then Record &rarr; Stop.
+The clip uploads and processes automatically. Works on a phone or a desktop webcam.</p></section>
 <div class="card">
   <div class="row2"><div><label>Subject</label><input id="subject" placeholder="e.g. J. Smith"></div>
-  <div><label>Trial label</label><input id="trial" placeholder="e.g. walk"></div></div>
-  <label>Camera</label>
+  <div><label>Movement</label><select id="task" onchange="upd()">
+    <option value="gait">Walking (gait)</option><option value="squat">Squat</option>
+    <option value="sit_to_stand">Sit-to-stand</option><option value="tug">Timed Up &amp; Go (TUG)</option>
+  </select></div></div>
+  <div id="guide" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:11px 14px;margin-top:14px;font-size:13px;color:#0f172a"></div>
+  <div id="stsfields" style="display:none"><div class="row2">
+    <div><label>Height (cm) &mdash; optional, for leg power</label><input id="height_cm" type="number" step="0.1" placeholder="170"></div>
+    <div><label>Weight (kg) &mdash; optional, for leg power</label><input id="weight_kg" type="number" step="0.1" placeholder="70"></div></div></div>
+  <div class="row2">
+    <div id="modewrap"><label>Mode</label><select id="mode">__MODE_OPTS__</select></div>
+    <div><label>Orientation</label><select id="orient" onchange="initCam()">
+      <option value="landscape">Landscape (wide)</option>
+      <option value="portrait">Vertical (tall)</option></select></div></div>
+  <label>Camera</label><select id="cam" onchange="initCam()"></select>
+  <label>Preview</label>
   <video id="preview" autoplay muted playsinline style="width:100%;border-radius:10px;background:#000;max-height:60vh"></video>
   <div style="display:flex;gap:10px;margin-top:12px">
     <button class="btn" id="start" type="button" style="margin:0">&#9679; Record</button>
@@ -370,41 +380,65 @@ body (head to feet) in frame for the entire walk; film the SIDE view; 4&ndash;6 
   <p class="note" id="st" style="margin-top:12px">Requesting camera&hellip;</p>
 </div>
 <script>
-let rec, chunks=[], stream;
-const $=id=>document.getElementById(id), st=$('st');
-async function init(){
-  try{
-    stream = await navigator.mediaDevices.getUserMedia(
-      {video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false});
-    $('preview').srcObject = stream; st.textContent='Ready. Press Record when the subject is in frame.';
-  }catch(e){ st.innerHTML='Camera unavailable ('+e.message+'). Use <a href="/process">Process video</a> to upload a clip instead.'; }
-}
-$('start').onclick=()=>{
-  if(!stream) return;
-  chunks=[]; let mt='video/webm';
-  if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/mp4')) mt='video/mp4';
-  try{ rec=new MediaRecorder(stream,{mimeType:mt}); }catch(e){ rec=new MediaRecorder(stream); }
-  rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  rec.start(); $('start').disabled=true; $('stop').disabled=false; st.textContent='Recording&hellip;';
+var GUIDE={
+gait:'<b>Walking</b> &mdash; film from the <b>side</b> (profile), whole body in frame, ~3&ndash;4 m back, lens at hip height. Walk 4&ndash;6 strides across the view.',
+squat:'<b>Squat</b> &mdash; film from the <b>side</b>, whole body in frame, ~3 m back. Do 3&ndash;5 squats at a steady pace.',
+sit_to_stand:'<b>Sit-to-stand</b> &mdash; film from the <b>side</b>; whole body + the chair in frame, arms across chest (no hands). Do 5 stand&rarr;sit reps, or as many as you can in 30 s. Enter height &amp; weight for leg power.',
+tug:'<b>Timed Up &amp; Go</b> &mdash; film from the <b>side</b>, far enough to keep the subject in frame. Sit, stand on \\'go\\', walk ~3 m, turn, walk back, sit.'
 };
-$('stop').onclick=()=>{
-  if(!rec) return;
-  rec.onstop=async()=>{
-    const type=(chunks[0]&&chunks[0].type)||'video/webm';
-    const ext=type.indexOf('mp4')>=0?'mp4':'webm';
-    const blob=new Blob(chunks,{type});
-    const fd=new FormData();
-    fd.append('video', blob, 'recording.'+ext);
-    fd.append('subject', $('subject').value); fd.append('trial', $('trial').value);
-    fd.append('trial_hint',''); fd.append('speed',''); fd.append('mode','screening');
-    st.textContent='Uploading & processing&hellip;';
-    try{ const r=await fetch('/process',{method:'POST',body:fd}); window.location = r.url; }
-    catch(e){ st.textContent='Upload failed: '+e.message; }
-  };
-  rec.stop(); $('start').disabled=false; $('stop').disabled=true;
-};
-init();
+var rec, chunks=[], stream;
+function $(id){return document.getElementById(id);}
+function upd(){var t=$('task').value;
+  $('guide').innerHTML=GUIDE[t]||'';
+  $('stsfields').style.display=(t=='sit_to_stand')?'block':'none';
+  $('modewrap').style.display=(t=='gait')?'block':'none';}
+function constraints(){var land=$('orient').value=='landscape';
+  var v={width:{ideal:land?1920:1080},height:{ideal:land?1080:1920}};
+  var dev=$('cam').value; if(dev) v.deviceId={exact:dev};
+  return {video:v,audio:false};}
+async function listCams(){try{
+  var ds=await navigator.mediaDevices.enumerateDevices();
+  var cams=ds.filter(function(d){return d.kind=='videoinput';});
+  var sel=$('cam'); if(sel.options.length===cams.length && sel.options.length>0) return;
+  var cur=sel.value; sel.innerHTML='';
+  cams.forEach(function(c,i){var o=document.createElement('option');o.value=c.deviceId;o.text=c.label||('Camera '+(i+1));sel.add(o);});
+  if(cur) sel.value=cur;}catch(e){}}
+async function initCam(){try{
+  if(stream){stream.getTracks().forEach(function(t){t.stop();});}
+  stream=await navigator.mediaDevices.getUserMedia(constraints());
+  $('preview').srcObject=stream; $('st').textContent='Ready. Press Record when framed.';
+  await listCams();
+  }catch(e){$('st').innerHTML='Camera unavailable ('+e.message+'). Use <a href="/process">Process video</a> to upload a clip instead.';}}
+$('start').onclick=function(){if(!stream)return; chunks=[];
+  var mt='video/webm';
+  if(window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/mp4'))mt='video/mp4';
+  try{rec=new MediaRecorder(stream,{mimeType:mt});}catch(e){rec=new MediaRecorder(stream);}
+  rec.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
+  rec.start(); $('start').disabled=true; $('stop').disabled=false; $('st').textContent='Recording\\u2026';};
+$('stop').onclick=function(){if(!rec)return;
+  rec.onstop=async function(){
+    var type=(chunks[0]&&chunks[0].type)||'video/webm';
+    var ext=type.indexOf('mp4')>=0?'mp4':'webm';
+    var blob=new Blob(chunks,{type:type}); var t=$('task').value;
+    var fd=new FormData();
+    fd.append('video',blob,'recording.'+ext);
+    fd.append('subject',$('subject').value); fd.append('trial','');
+    fd.append('task',t); fd.append('mode',(t=='gait')?$('mode').value:'screening');
+    fd.append('height_cm',$('height_cm')?$('height_cm').value:'');
+    fd.append('weight_kg',$('weight_kg')?$('weight_kg').value:'');
+    $('st').textContent='Uploading \\u0026 processing\\u2026';
+    try{var r=await fetch('/process',{method:'POST',body:fd}); window.location=r.url;}
+    catch(e){$('st').textContent='Upload failed: '+e.message;}};
+  rec.stop(); $('start').disabled=false; $('stop').disabled=true;};
+upd(); initCam();
 </script>"""
+
+
+def _record_body() -> str:
+    mode_opts = '<option value="screening">2D screening</option>'
+    if _capabilities()["opensim"] or dispatch.storage_configured():
+        mode_opts += '<option value="quick">3D OpenSim (walking, experimental)</option>'
+    return _RECORD_TMPL.replace("__MODE_OPTS__", mode_opts)
 
 
 _JOB_BODY = """<section class="hero"><h1>Processing&hellip; <span id="st" class="badge">queued</span></h1>
@@ -666,7 +700,7 @@ def create_app(process_fn=None):
 
     @app.get("/record", response_class=HTMLResponse)
     def record_page():
-        return _shell("Record", _RECORD_BODY, "record")
+        return _shell("Record", _record_body(), "record")
 
     @app.get("/samples", response_class=HTMLResponse)
     def samples_page():
