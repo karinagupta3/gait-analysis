@@ -150,6 +150,12 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--a
 .s:hover{border-color:#cbd5e1;text-decoration:none;box-shadow:0 1px 3px rgba(16,24,40,.06)}
 .s .who{font-weight:600}.s .meta{color:var(--muted);font-size:13px}
 .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:11px;padding:22px;text-align:center}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:0 0 8px}@media(max-width:560px){.acts{grid-template-columns:1fr}}
+.act{display:block;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;box-shadow:0 1px 2px rgba(16,24,40,.04);transition:border-color .15s,box-shadow .15s}
+.act:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(13,148,136,.12);text-decoration:none}
+.act .t{font-weight:700;color:var(--ink);font-size:16px}
+.act .d{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.45}
+.act .ic{font-size:20px;margin-right:8px}
 .banner{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 18px}
 .banner b{display:block;margin-bottom:6px}.ok{color:var(--ok)}.bad{color:var(--bad)}
 .steps{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 20px;margin:0 0 18px}
@@ -170,13 +176,13 @@ def _shell(title: str, body: str, active: str = "") -> str:
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{title}</title><style>{BASE_CSS}</style></head><body>'
-            f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait Analysis</a>'
+            f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait &amp; Movement</a>'
             f'<nav>{nav("/process", "Process video", "process")}{nav("/record", "Record (phone)", "record")}'
             f'{nav("/capture", "2-phone", "capture")}{nav("/samples", "Samples", "samples")}'
             f'{nav("/setup", "Setup", "setup")}'
             f'{nav("/logout", "Sign out", "") if _auth_enabled() else ""}</nav></div></header>'
             f'<main>{body}</main>'
-            f'<footer>Gait Analysis · clinical kinematics from OpenSim</footer></body></html>')
+            f'<footer>Gait &amp; Movement Analysis · screening tool, not a diagnosis</footer></body></html>')
 
 
 _INDEX_FORM = """<div class="card">
@@ -193,23 +199,40 @@ _INDEX_FORM = """<div class="card">
 </form></div>"""
 
 
+def _act(href, icon, title, desc):
+    return (f'<a class="act" href="{href}"><div class="t"><span class="ic">{icon}</span>{title}</div>'
+            f'<div class="d">{desc}</div></a>')
+
+
 def _render_index() -> str:
     sessions = _list_sessions()
-    if not sessions:
-        rows = '<div class="empty">No trials yet &mdash; upload a <code>.mot</code> to get started.</div>'
-    else:
+    acts = (
+        '<div class="acts">'
+        + _act("/process", "&#127909;", "Process a video",
+               "Upload a clip &rarr; pose tracking + a clinical report.")
+        + _act("/record", "&#128241;", "Record with a phone",
+               "Open on a phone, record, and it processes automatically.")
+        + _act("/capture", "&#127919;", "Two-phone 3D",
+               "Accurate 3D from two synced phones (advanced).")
+        + _act("/samples", "&#9654;", "Try a sample",
+               "Run a built-in clip to see what a report looks like.")
+        + '</div>')
+    if sessions:
         rows = "".join(
             f'<a class="s" href="/session/{s["id"]}">'
             f'<span><span class="who">{s.get("subject") or "Subject"}</span>'
             f'<span class="meta"> &middot; {s.get("trial") or "trial"}</span></span>'
             f'<span class="meta">{s.get("created","")[:16].replace("T"," ")}</span></a>'
             for s in sessions)
-    body = (f'<section class="hero"><h1>Gait Analysis</h1>'
-            f'<p class="lead">Upload an OpenSim <code>.mot</code> to generate a clinical report, '
-            f'or <a href="/process">process a video</a>.</p></section>'
-            f'{_INDEX_FORM}'
-            f'<h2 class="section">Recent trials</h2><div class="slist">{rows}</div>')
-    return _shell("Gait Analysis", body, "index")
+        recent = f'<h2 class="section">Recent reports</h2><div class="slist">{rows}</div>'
+    else:
+        recent = ('<h2 class="section">Recent reports</h2>'
+                  '<div class="empty">No reports yet &mdash; start with '
+                  '&ldquo;Process a video&rdquo; or &ldquo;Try a sample&rdquo;.</div>')
+    body = (f'<section class="hero"><h1>Gait &amp; Movement Analysis</h1>'
+            f'<p class="lead">Record or upload a movement and get an objective report. Start here:</p></section>'
+            f'{acts}{recent}')
+    return _shell("Gait & Movement Analysis", body, "index")
 
 
 # Capture protocol (after OpenCap recording guidance + Pose2Sim multi-cam notes).
@@ -266,7 +289,11 @@ def _setup_body() -> str:
             '<pre><code>gait-build-model --base LaiUhlrich2022.osim --out LaiUhlrich2022_ga.osim\n'
             'export GAIT_OSIM_MODEL=$PWD/LaiUhlrich2022_ga.osim\ngait-web</code></pre>'
             '<p class="note">3. Validate it against your Pose2Sim output before trusting it '
-            '(<code>gait-validate</code>; sagittal RMSE &le; ~5&deg;).</p></div>')
+            '(<code>gait-validate</code>; sagittal RMSE &le; ~5&deg;).</p></div>'
+            '<h2 class="section">Advanced: report from an OpenSim .mot</h2>'
+            '<p class="note">If you already have an OpenSim <code>.mot</code> motion file, generate a '
+            'report directly (no video processing).</p>'
+            + _INDEX_FORM)
 
 
 def _samples_body() -> str:
