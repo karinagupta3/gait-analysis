@@ -1,7 +1,11 @@
 # Web app + single-phone 2D screening (MediaPipe pose -> sagittal angles -> report).
 # Heavy video->.mot 3D (Pose2Sim + OpenSim) is still NOT in this image -- that's the
 # two-phone "accurate" mode, run where OpenSim is installed.
-FROM python:3.11-slim
+#
+# Base image pulled from the AWS ECR Public mirror of the Docker official image
+# (identical to docker.io/library/python:3.11-slim) to avoid Docker Hub's
+# anonymous pull rate limit, which intermittently fails ACR builds.
+FROM public.ecr.aws/docker/library/python:3.11-slim
 WORKDIR /app
 
 # System libs MediaPipe/OpenCV need at runtime (libGL + GLES/EGL + glib).
