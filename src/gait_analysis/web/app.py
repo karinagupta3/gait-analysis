@@ -32,6 +32,20 @@ except ImportError:  # pragma: no cover - exercised only without the extra
 # Override with GAIT_STORE_DIR (e.g. /tmp on read-only serverless filesystems).
 DATA_DIR = Path(os.environ.get("GAIT_STORE_DIR", Path(__file__).resolve().parent / "_data"))
 
+# Curated, verified full-body SIDE-VIEW walking clips for one-click testing. Each is
+# downloaded server-side and run through 2D screening. URLs are restricted to the hosts
+# below (SSRF guard) — only these clips can be fetched, nothing arbitrary.
+SAMPLE_VIDEOS = [
+    {"id": "mixkit_man", "label": "Man walking (plaza, side view)",
+     "desc": "Full-body profile, ~12 s — the cleanest reference clip.",
+     "url": "https://assets.mixkit.co/videos/4855/4855-720.mp4"},
+]
+_ALLOWED_SAMPLE_HOSTS = {"assets.mixkit.co", "videos.pexels.com", "upload.wikimedia.org"}
+
+
+def _sample_by_id(sid: str) -> dict | None:
+    return next((s for s in SAMPLE_VIDEOS if s["id"] == sid), None)
+
 
 def _store_dir() -> Path:
     d = DATA_DIR / "sessions"
@@ -102,8 +116,8 @@ def _shell(title: str, body: str, active: str = "") -> str:
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{title}</title><style>{BASE_CSS}</style></head><body>'
             f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait Analysis</a>'
-            f'<nav>{nav("/", "New report", "index")}{nav("/process", "Process video", "process")}'
-            f'{nav("/setup", "Setup", "setup")}</nav></div></header>'
+            f'<nav>{nav("/process", "Process video", "process")}{nav("/record", "Record (phone)", "record")}'
+            f'{nav("/samples", "Samples", "samples")}{nav("/setup", "Setup", "setup")}</nav></div></header>'
             f'<main>{body}</main>'
             f'<footer>Gait Analysis · clinical kinematics from OpenSim</footer></body></html>')
 
@@ -197,6 +211,83 @@ def _setup_body() -> str:
             '(<code>gait-validate</code>; sagittal RMSE &le; ~5&deg;).</p></div>')
 
 
+def _samples_body() -> str:
+    if not SAMPLE_VIDEOS:
+        return ('<section class="hero"><h1>Sample videos</h1>'
+                '<p class="lead">No samples configured.</p></section>')
+    cards = ""
+    for s in SAMPLE_VIDEOS:
+        cards += (
+            f'<div class="s"><span><span class="who">{s["label"]}</span>'
+            f'<span class="meta"> &middot; {s["desc"]}</span></span>'
+            f'<span style="display:flex;gap:8px">'
+            f'<a class="meta" href="{s["url"]}" download>download</a>'
+            f'<form action="/process-sample" method="post" style="margin:0">'
+            f'<input type="hidden" name="sample_id" value="{s["id"]}">'
+            f'<button class="btn" style="margin:0;padding:7px 14px" type="submit">Run &rarr;</button>'
+            f'</form></span></div>')
+    return (f'<section class="hero"><h1>Sample videos</h1>'
+            f'<p class="lead">Verified full-body, side-view walking clips for testing. '
+            f'Click <b>Run</b> to fetch one and generate a report, or <b>download</b> to try it via '
+            f'<a href="/process">Process video</a>.</p></section>'
+            f'<div class="slist">{cards}</div>')
+
+
+_RECORD_BODY = """<section class="hero"><h1>Record with your phone</h1>
+<p class="lead">Open this page ON the phone, frame the whole body from the side, then Record &rarr; Stop.
+The clip uploads and processes automatically &mdash; no files to manage.</p></section>
+<div class="banner" style="background:#f0f9ff;border-color:#bae6fd">
+<b>Before you record</b>Stand the phone ~3&ndash;4 m back, landscape, lens at hip height; keep the whole
+body (head to feet) in frame for the entire walk; film the SIDE view; 4&ndash;6 strides.</div>
+<div class="card">
+  <div class="row2"><div><label>Subject</label><input id="subject" placeholder="e.g. J. Smith"></div>
+  <div><label>Trial label</label><input id="trial" placeholder="e.g. walk"></div></div>
+  <label>Camera</label>
+  <video id="preview" autoplay muted playsinline style="width:100%;border-radius:10px;background:#000;max-height:60vh"></video>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="btn" id="start" type="button" style="margin:0">&#9679; Record</button>
+    <button class="btn" id="stop" type="button" disabled style="margin:0;background:#b91c1c">&#9632; Stop &amp; upload</button>
+  </div>
+  <p class="note" id="st" style="margin-top:12px">Requesting camera&hellip;</p>
+</div>
+<script>
+let rec, chunks=[], stream;
+const $=id=>document.getElementById(id), st=$('st');
+async function init(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia(
+      {video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false});
+    $('preview').srcObject = stream; st.textContent='Ready. Press Record when the subject is in frame.';
+  }catch(e){ st.innerHTML='Camera unavailable ('+e.message+'). Use <a href="/process">Process video</a> to upload a clip instead.'; }
+}
+$('start').onclick=()=>{
+  if(!stream) return;
+  chunks=[]; let mt='video/webm';
+  if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/mp4')) mt='video/mp4';
+  try{ rec=new MediaRecorder(stream,{mimeType:mt}); }catch(e){ rec=new MediaRecorder(stream); }
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  rec.start(); $('start').disabled=true; $('stop').disabled=false; st.textContent='Recording&hellip;';
+};
+$('stop').onclick=()=>{
+  if(!rec) return;
+  rec.onstop=async()=>{
+    const type=(chunks[0]&&chunks[0].type)||'video/webm';
+    const ext=type.indexOf('mp4')>=0?'mp4':'webm';
+    const blob=new Blob(chunks,{type});
+    const fd=new FormData();
+    fd.append('video', blob, 'recording.'+ext);
+    fd.append('subject', $('subject').value); fd.append('trial', $('trial').value);
+    fd.append('trial_hint',''); fd.append('speed',''); fd.append('mode','screening');
+    st.textContent='Uploading & processing&hellip;';
+    try{ const r=await fetch('/process',{method:'POST',body:fd}); window.location = r.url; }
+    catch(e){ st.textContent='Upload failed: '+e.message; }
+  };
+  rec.stop(); $('start').disabled=false; $('stop').disabled=true;
+};
+init();
+</script>"""
+
+
 _JOB_BODY = """<section class="hero"><h1>Processing&hellip; <span id="st" class="badge">queued</span></h1>
 <p class="lead">Pose estimation can take a minute or two. This page updates live and opens the report when done.</p></section>
 <div class="err" id="err"></div>
@@ -252,30 +343,45 @@ def _status_banner() -> str:
     return f"<div class='banner' style='background:{bg}'><b>{head}</b>{required}{optional}</div>"
 
 
+def _run_screening_subprocess(job, video_path: Path, sdir: Path, meta: dict) -> str:
+    """Single-phone 2D sagittal screening in a SUBPROCESS so the heavy MediaPipe pass
+    can't starve the uvicorn event loop (keeps /health + status polls responsive)."""
+    import subprocess
+    import sys as _sys
+    job.log.append("MediaPipe pose -> 2D sagittal screening (subprocess) ...")
+    proc = subprocess.run(
+        [_sys.executable, "-m", "gait_analysis.web.screening_job",
+         str(video_path), str(sdir), meta.get("subject") or ""],
+        capture_output=True, text=True, timeout=1800,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        raise RuntimeError("screening failed: " + (tail[-1] if tail else "unknown error"))
+    if not (sdir / "report.html").exists():
+        raise RuntimeError("screening produced no report")
+    (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
+    return sdir.name
+
+
+def _sample_process(job, url: str, sdir: Path, meta: dict) -> str:
+    """Download a curated sample clip (whitelisted host) then run 2D screening on it."""
+    import urllib.request
+    from urllib.parse import urlparse
+    if urlparse(url).hostname not in _ALLOWED_SAMPLE_HOSTS:
+        raise RuntimeError("sample URL host not allowed")
+    job.log.append("downloading sample clip ...")
+    video_path = sdir / "input.mp4"
+    urllib.request.urlretrieve(url, video_path)
+    return _run_screening_subprocess(job, video_path, sdir, meta)
+
+
 def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
     """Real quick-mode processing: video -> MediaPipe 3D -> OpenSim IK -> .mot -> report."""
     mode = meta.get("mode") or "screening"
     job.log.append(f"mode={mode}: starting")
 
-    # Single-phone 2D sagittal screening: no OpenSim/model needed. Runs in a SUBPROCESS
-    # so the heavy MediaPipe pass can't starve the uvicorn event loop (keeps the web
-    # responsive — /health and status polls stay up while a job runs).
     if mode == "screening":
-        import subprocess
-        import sys as _sys
-        job.log.append("MediaPipe pose -> 2D sagittal screening (subprocess) ...")
-        proc = subprocess.run(
-            [_sys.executable, "-m", "gait_analysis.web.screening_job",
-             str(video_path), str(sdir), meta.get("subject") or ""],
-            capture_output=True, text=True, timeout=1800,
-        )
-        if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            raise RuntimeError("screening failed: " + (tail[-1] if tail else "unknown error"))
-        if not (sdir / "report.html").exists():
-            raise RuntimeError("screening produced no report")
-        (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
-        return sdir.name
+        return _run_screening_subprocess(job, video_path, sdir, meta)
 
     if mode != "quick":
         raise RuntimeError("Only screening (2D) and quick (3D) modes are wired into the app; "
@@ -375,6 +481,27 @@ def create_app(process_fn=None):
     @app.get("/setup", response_class=HTMLResponse)
     def setup_page():
         return _shell("Setup", _setup_body(), "setup")
+
+    @app.get("/record", response_class=HTMLResponse)
+    def record_page():
+        return _shell("Record", _RECORD_BODY, "record")
+
+    @app.get("/samples", response_class=HTMLResponse)
+    def samples_page():
+        return _shell("Samples", _samples_body(), "samples")
+
+    @app.post("/process-sample")
+    def process_sample(sample_id: str = Form(...)):
+        s = _sample_by_id(sample_id)
+        if s is None:
+            return HTMLResponse("<p>Unknown sample. <a href='/samples'>Back</a></p>", status_code=404)
+        sid = uuid.uuid4().hex[:8]
+        sdir = _store_dir() / sid
+        sdir.mkdir(parents=True, exist_ok=True)
+        meta = {"id": sid, "subject": s["label"], "trial": "sample", "speed": None, "mode": "screening"}
+        (sdir / "meta.json").write_text(json.dumps({**meta, "state": "processing"}))
+        jid = jm.submit(lambda job: _sample_process(job, s["url"], sdir, meta))
+        return RedirectResponse(f"/job/{jid}", status_code=303)
 
     @app.post("/process")
     async def process(video: UploadFile, subject: str = Form(""), trial: str = Form(""),
