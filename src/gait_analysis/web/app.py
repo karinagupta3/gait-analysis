@@ -262,18 +262,39 @@ def _process_body() -> str:
     if _capabilities()["opensim"] or dispatch.storage_configured():
         mode_opts += ('<option value="quick">3D (OpenSim) — experimental; '
                       'single-camera depth is approximate</option>')
-    return (f'<section class="hero"><h1>Process a video</h1>'
-            f'<p class="lead">Single-phone 2D screening: a side-view video &rarr; pose estimation &rarr; '
-            f'sagittal knee/hip angles + a synced 3D skeleton. No setup needed.</p></section>'
-            f'{_status_banner()}{CAPTURE_HTML}'
-            f'<div class="card"><form action="/process" method="post" enctype="multipart/form-data">'
-            f'<div class="row2"><div><label>Subject</label><input name="subject" placeholder="e.g. J. Smith"></div>'
-            f'<div><label>Trial label</label><input name="trial" placeholder="e.g. walk"></div></div>'
-            f'<label>Task hint (optional)</label><input name="trial_hint" placeholder="walking | squat | sit-to-stand">'
-            f'<label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01">'
-            f'<label>Mode</label><select name="mode">{mode_opts}</select>'
-            f'<label>Video</label><input name="video" type="file" accept="video/*" required>'
-            f'<button class="btn" type="submit">Upload &amp; process</button></form></div>')
+    return (
+        '<section class="hero"><h1>Process a video</h1>'
+        '<p class="lead">Pick the movement, record it from the side, and get a report. '
+        'No setup needed.</p></section>'
+        f'{_status_banner()}'
+        '<div class="card"><form action="/process" method="post" enctype="multipart/form-data">'
+        '<div class="row2"><div><label>Subject</label>'
+        '<input name="subject" placeholder="e.g. J. Smith"></div>'
+        '<div><label>Movement</label>'
+        '<select name="task" id="task" onchange="updGuide()">'
+        '<option value="gait">Walking (gait)</option>'
+        '<option value="squat">Squat</option>'
+        '<option value="sit_to_stand">Sit-to-stand</option>'
+        '</select></div></div>'
+        '<div id="guide" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;'
+        'padding:11px 14px;margin-top:14px;font-size:13px;color:#0f172a"></div>'
+        '<label>Trial label (optional)</label>'
+        '<input name="trial" placeholder="auto-named from the movement">'
+        f'<label>Mode</label><select name="mode">{mode_opts}</select>'
+        '<label>Video</label><input name="video" type="file" accept="video/*" required>'
+        '<button class="btn" type="submit">Upload &amp; process</button></form></div>'
+        '<script>'
+        'var GUIDE={'
+        'gait:"<b>Walking</b> &mdash; film the <b>side</b> (profile). Whole body in frame, ~3&ndash;4 m '
+        'back, phone at hip height, landscape. Walk 4&ndash;6 strides across the view.",'
+        'squat:"<b>Squat</b> &mdash; film the <b>side</b> (profile) for depth + trunk lean. Whole body '
+        'in frame, ~3 m back. Do 3&ndash;5 squats at a steady pace.",'
+        'sit_to_stand:"<b>Sit-to-stand</b> &mdash; film the <b>side</b> (profile); keep the whole body '
+        '<i>and the chair</i> in frame. Do <b>5 full stand&rarr;sit reps</b> (5&times; sit-to-stand)."'
+        '};'
+        'function updGuide(){var t=document.getElementById("task").value;'
+        'document.getElementById("guide").innerHTML=GUIDE[t]||"";}updGuide();'
+        '</script>')
 
 
 def _setup_body() -> str:
@@ -436,7 +457,7 @@ def _run_screening_subprocess(job, video_path: Path, sdir: Path, meta: dict) -> 
     job.log.append("MediaPipe pose -> 2D sagittal screening (subprocess) ...")
     proc = subprocess.run(
         [_sys.executable, "-m", "gait_analysis.web.screening_job",
-         str(video_path), str(sdir), meta.get("subject") or ""],
+         str(video_path), str(sdir), meta.get("subject") or "", meta.get("task") or "gait"],
         capture_output=True, text=True, timeout=1800,
     )
     if proc.returncode != 0:
@@ -713,15 +734,17 @@ def create_app(process_fn=None):
 
     @app.post("/process")
     async def process(video: UploadFile, subject: str = Form(""), trial: str = Form(""),
-                      trial_hint: str = Form(""), speed: str = Form(""), mode: str = Form("quick")):
+                      task: str = Form("gait"), speed: str = Form(""), mode: str = Form("screening")):
         sid = uuid.uuid4().hex[:8]
         sdir = _store_dir() / sid
         sdir.mkdir(parents=True, exist_ok=True)
         suffix = Path(video.filename or "input.mov").suffix or ".mov"
         video_path = sdir / f"input{suffix}"
         video_path.write_bytes(await video.read())
-        trial_full = f"{trial} ({trial_hint})".strip() if trial_hint.strip() else trial
-        meta = {"id": sid, "subject": subject, "trial": trial_full,
+        task = task if task in ("gait", "squat", "sit_to_stand") else "gait"
+        trial_full = trial or {"gait": "walk", "squat": "squat",
+                               "sit_to_stand": "sit-to-stand"}.get(task, task)
+        meta = {"id": sid, "subject": subject, "trial": trial_full, "task": task,
                 "speed": float(speed) if speed.strip() else None, "mode": mode}
         (sdir / "meta.json").write_text(json.dumps({**meta, "state": "processing"}))
         jid = jm.submit(lambda job: process_fn(job, video_path, sdir, meta))

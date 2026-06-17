@@ -85,27 +85,36 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     return result
 
 
-def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> dict:
-    """Single-phone 2D SAGITTAL screening: video -> pose -> sagittal angles -> report.
+def run_screening(video: str | Path, outdir: str | Path, subject: str = "",
+                  task: str = "gait") -> dict:
+    """Single-phone 2D SAGITTAL screening: video -> pose -> metrics -> report.
 
-    No depth, no scaling, no OpenSim. Needs only mediapipe + a side-view video.
-    Returns the angle summary and writes a self-contained HTML screening report.
+    task = "gait" (cadence/strides/per-stride peaks), "squat", or "sit_to_stand"
+    (rep counting, depth/timing). No depth, no scaling, no OpenSim — just a
+    side-view video. Writes a self-contained HTML screening report.
     """
     import numpy as np
     from .pose import mediapipe3d
-    from .analysis import gait_metrics_2d, screening_report
 
     video, outdir = Path(video), Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    print("[1/3] MediaPipe pose ...")
+    print(f"[1/3] MediaPipe pose (task={task}) ...")
     d = mediapipe3d.extract_world_landmarks(video)
     np.savez_compressed(outdir / "pose.npz", **d)
-    print("[2/3] Gait metrics (both legs: cadence, strides, per-stride peaks, symmetry) ...")
-    metrics = gait_metrics_2d.compute_gait_metrics(
-        d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]), float(d["fps"]))
-    print("[3/3] Screening report ...")
-    report_path = screening_report.build_screening_report(
-        metrics, outdir / "screening_report.html", subject=subject)
+    args = (d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]), float(d["fps"]))
+    report_out = outdir / "screening_report.html"
+    if task in ("squat", "sit_to_stand"):
+        from .analysis import movement_2d, movement_report
+        print(f"[2/3] {task} metrics (reps, depth/timing, symmetry) ...")
+        metrics = movement_2d.compute_movement_metrics(*args, task)
+        print("[3/3] Movement report ...")
+        report_path = movement_report.build_movement_report(metrics, report_out, subject=subject)
+    else:
+        from .analysis import gait_metrics_2d, screening_report
+        print("[2/3] Gait metrics (cadence, strides, per-stride peaks, symmetry) ...")
+        metrics = gait_metrics_2d.compute_gait_metrics(*args)
+        print("[3/3] Screening report ...")
+        report_path = screening_report.build_screening_report(metrics, report_out, subject=subject)
 
     # Synced viewer: video with 2D pose overlay (left) + 3D world-landmark skeleton (right).
     viewer_path = None
@@ -117,8 +126,8 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> d
     except Exception as exc:
         print(f"[note] synced viewer skipped: {exc}")
 
-    return {"mode": "screening", "metrics": metrics, "report": str(report_path),
-            "viewer": viewer_path}
+    return {"mode": "screening", "task": task, "metrics": metrics,
+            "report": str(report_path), "viewer": viewer_path}
 
 
 def run_accurate(project_dir: str | Path, gait_speed_m_s: float | None = None) -> dict:
