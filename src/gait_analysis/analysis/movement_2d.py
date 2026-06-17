@@ -28,6 +28,9 @@ _IDX = {name: i for i, name in enumerate(BLAZEPOSE_33)}
 STS_5X_NORMS = {"(<60)": 10.0, "60-69": 11.4, "70-79": 12.6, "80-89": 14.8}
 STS_5X_SCREEN_S = 12.0         # >=12 s = screen-positive for fall risk (Tiedemann 2008)
 STS_5X_FALLRISK_S = 15.0       # >15 s = recurrent fallers (Buatois 2010)
+# Relative STS leg-power low cutoffs (W/kg) — Garcia-Aguirre 2025 (sex-specific).
+STS_POWER_LOW_WKG = {"men": 2.53, "women": 2.01}
+CHAIR_HEIGHT_M = 0.43          # standard chair seat height (Alcazar 2018 power eq.)
 # Squat depth bands by peak knee flexion (deg) — Straub & Powers, IJSPT 2024.
 SQUAT_DEPTH_BANDS = [(110, "deep / past parallel"), (90, "parallel"),
                      (60, "partial (above parallel)"), (0, "shallow")]
@@ -66,7 +69,42 @@ def _sym(a, b):
     return round(100.0 * (1 - abs(a - b) / max(abs(a), abs(b))), 0)
 
 
-def compute_movement_metrics(image_landmarks, visibility, width, height, fps, task) -> dict:
+def _sts_extra(tops, bottoms, fps, n_frames, height_cm, weight_kg) -> dict:
+    """Multiple validated tests from ONE sit-to-stand recording.
+
+    tops = standing events (knee-flexion minima); bottoms = seated (maxima).
+      * 5x STS  : time from seated start to the 5th stand        (Tiedemann 2008)
+      * 30s STS : stands within 30 s of start, if the clip is long enough (Rikli & Jones)
+      * leg power: Alcazar 2018 equation from time/rep + body height & mass
+    """
+    out = {}
+    stands = len(tops)
+    out["stands"] = stands
+    clip_dur = n_frames / fps
+    out["clip_dur_s"] = round(clip_dur, 1)
+    start = bottoms[0] if (bottoms and tops and bottoms[0] < tops[0]) else 0
+
+    if stands >= 5:
+        out["sts_5x_time_s"] = round((tops[4] - start) / fps, 1)
+    if clip_dur >= 28:                       # a real 30-second test was recorded
+        cutoff = start + int(30 * fps)
+        out["sts_30s_count"] = int(sum(1 for t in tops if t <= cutoff))
+
+    # Alcazar leg power (Path A): COM rises ~ 0.9*height*0.5 - chair_height per stand.
+    if height_cm and weight_kg and stands >= 1:
+        h, m, g = height_cm / 100.0, float(weight_kg), 9.81
+        t_per = (out["sts_5x_time_s"] / 5 if "sts_5x_time_s" in out
+                 else ((tops[-1] - start) / fps / stands if stands else None))
+        disp = 0.9 * h * 0.5 - CHAIR_HEIGHT_M
+        if t_per and t_per > 0 and disp > 0:
+            p = (m * g * disp) / (t_per * 0.5)
+            out["power_w"] = round(p, 0)
+            out["power_wkg"] = round(p / m, 2)
+    return out
+
+
+def compute_movement_metrics(image_landmarks, visibility, width, height, fps, task,
+                             height_cm=None, weight_kg=None) -> dict:
     fps = float(fps) or 30.0
     px = image_landmarks.astype(float) * np.array([width, height])
     vis = visibility.astype(float)
@@ -116,11 +154,10 @@ def compute_movement_metrics(image_landmarks, visibility, width, height, fps, ta
         out["time_per_rep_s"] = round(total / (n_reps - 1), 2)
 
     if task == "sit_to_stand":
-        # 5x STS: time for 5 full rises. Use the time spanning 5 cycles when present.
-        if n_reps >= 6:                     # 6 bottoms bound 5 complete cycles
-            out["sts_5x_time_s"] = round((bottoms[5] - bottoms[0]) / fps, 1)
-        elif n_reps >= 2:
-            # extrapolate per-rep time to 5 reps (clearly labeled as estimated)
+        out.update(_sts_extra(out["_tops"], out["_bottoms"], fps,
+                              len(image_landmarks), height_cm, weight_kg))
+        # 5x estimate when fewer than 5 stands were recorded (clearly labeled).
+        if "sts_5x_time_s" not in out and out.get("time_per_rep_s"):
             out["sts_5x_time_s_est"] = round(out["time_per_rep_s"] * 5, 1)
     elif task == "squat":
         km = out["knee_peak_mean"]

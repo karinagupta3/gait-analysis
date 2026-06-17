@@ -278,6 +278,11 @@ def _process_body() -> str:
         '</select></div></div>'
         '<div id="guide" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;'
         'padding:11px 14px;margin-top:14px;font-size:13px;color:#0f172a"></div>'
+        '<div id="stsfields" style="display:none">'
+        '<div class="row2"><div><label>Height (cm) &mdash; optional, for leg power</label>'
+        '<input name="height_cm" type="number" step="0.1" placeholder="e.g. 170"></div>'
+        '<div><label>Weight (kg) &mdash; optional, for leg power</label>'
+        '<input name="weight_kg" type="number" step="0.1" placeholder="e.g. 70"></div></div></div>'
         '<label>Trial label (optional)</label>'
         '<input name="trial" placeholder="auto-named from the movement">'
         f'<label>Mode</label><select name="mode">{mode_opts}</select>'
@@ -290,10 +295,14 @@ def _process_body() -> str:
         'squat:"<b>Squat</b> &mdash; film the <b>side</b> (profile) for depth + trunk lean. Whole body '
         'in frame, ~3 m back. Do 3&ndash;5 squats at a steady pace.",'
         'sit_to_stand:"<b>Sit-to-stand</b> &mdash; film the <b>side</b> (profile); keep the whole body '
-        '<i>and the chair</i> in frame. Do <b>5 full stand&rarr;sit reps</b> (5&times; sit-to-stand)."'
+        '<i>and the chair</i> in frame, arms across chest (no hands). Do <b>5 stand&rarr;sit reps</b> '
+        '(timed 5&times; test) <i>or</i> as many as you can in <b>30 s</b>. Enter height &amp; weight to '
+        'also get a leg-power estimate."'
         '};'
         'function updGuide(){var t=document.getElementById("task").value;'
-        'document.getElementById("guide").innerHTML=GUIDE[t]||"";}updGuide();'
+        'document.getElementById("guide").innerHTML=GUIDE[t]||"";'
+        'document.getElementById("stsfields").style.display=(t=="sit_to_stand")?"block":"none";}'
+        'updGuide();'
         '</script>')
 
 
@@ -457,7 +466,8 @@ def _run_screening_subprocess(job, video_path: Path, sdir: Path, meta: dict) -> 
     job.log.append("MediaPipe pose -> 2D sagittal screening (subprocess) ...")
     proc = subprocess.run(
         [_sys.executable, "-m", "gait_analysis.web.screening_job",
-         str(video_path), str(sdir), meta.get("subject") or "", meta.get("task") or "gait"],
+         str(video_path), str(sdir), meta.get("subject") or "", meta.get("task") or "gait",
+         str(meta.get("height_cm") or ""), str(meta.get("weight_kg") or "")],
         capture_output=True, text=True, timeout=1800,
     )
     if proc.returncode != 0:
@@ -734,7 +744,8 @@ def create_app(process_fn=None):
 
     @app.post("/process")
     async def process(video: UploadFile, subject: str = Form(""), trial: str = Form(""),
-                      task: str = Form("gait"), speed: str = Form(""), mode: str = Form("screening")):
+                      task: str = Form("gait"), speed: str = Form(""), mode: str = Form("screening"),
+                      height_cm: str = Form(""), weight_kg: str = Form("")):
         sid = uuid.uuid4().hex[:8]
         sdir = _store_dir() / sid
         sdir.mkdir(parents=True, exist_ok=True)
@@ -744,8 +755,15 @@ def create_app(process_fn=None):
         task = task if task in ("gait", "squat", "sit_to_stand") else "gait"
         trial_full = trial or {"gait": "walk", "squat": "squat",
                                "sit_to_stand": "sit-to-stand"}.get(task, task)
+
+        def _num(s):
+            try:
+                return float(s) if s.strip() else None
+            except ValueError:
+                return None
         meta = {"id": sid, "subject": subject, "trial": trial_full, "task": task,
-                "speed": float(speed) if speed.strip() else None, "mode": mode}
+                "speed": _num(speed), "mode": mode,
+                "height_cm": _num(height_cm), "weight_kg": _num(weight_kg)}
         (sdir / "meta.json").write_text(json.dumps({**meta, "state": "processing"}))
         jid = jm.submit(lambda job: process_fn(job, video_path, sdir, meta))
         return RedirectResponse(f"/job/{jid}", status_code=303)

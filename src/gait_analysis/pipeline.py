@@ -86,7 +86,7 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
 
 
 def run_screening(video: str | Path, outdir: str | Path, subject: str = "",
-                  task: str = "gait") -> dict:
+                  task: str = "gait", height_cm=None, weight_kg=None) -> dict:
     """Single-phone 2D SAGITTAL screening: video -> pose -> metrics -> report.
 
     task = "gait" (cadence/strides/per-stride peaks), "squat", or "sit_to_stand"
@@ -106,7 +106,8 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "",
     if task in ("squat", "sit_to_stand"):
         from .analysis import movement_2d, movement_report
         print(f"[2/3] {task} metrics (reps, depth/timing, symmetry) ...")
-        metrics = movement_2d.compute_movement_metrics(*args, task)
+        metrics = movement_2d.compute_movement_metrics(
+            *args, task, height_cm=height_cm, weight_kg=weight_kg)
         print("[3/3] Movement report ...")
         report_path = movement_report.build_movement_report(metrics, report_out, subject=subject)
     else:

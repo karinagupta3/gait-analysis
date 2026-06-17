@@ -69,7 +69,7 @@ def build_movement_report(metrics: dict, out_html, subject: str = "") -> Path:
     rows = ""
     if task == "sit_to_stand":
         five = metrics.get("sts_5x_time_s") or metrics.get("sts_5x_time_s_est")
-        est = " (estimated from fewer reps)" if metrics.get("sts_5x_time_s_est") else ""
+        est = " (est. from fewer reps)" if metrics.get("sts_5x_time_s_est") else ""
         note = ""
         if five is not None:
             note = ("&#9888; recurrent-faller range (>15 s)" if five > STS_5X_FALLRISK_S
@@ -77,11 +77,22 @@ def build_movement_report(metrics: dict, out_html, subject: str = "") -> Path:
                     else "within typical range")
         norm_txt = "60–69y ≈11.4 s, 70–79y ≈12.6 s; ≥12 s screen-positive (Tiedemann 2008)"
         rows += _row("5× sit-to-stand time", f"{five} s{est}" if five else None, norm_txt, note)
-        rows += _row("Rises detected", n)
-        rows += _row("Time per rise", f"{metrics.get('time_per_rep_s')} s" if metrics.get("time_per_rep_s") else None,
-                     "≈2–3 s")
+        rows += _row("Stands detected", metrics.get("stands", n))
+        # 30-second STS: only when a full ~30 s test was recorded.
+        c30 = metrics.get("sts_30s_count")
+        if c30 is not None:
+            rows += _row("30-second STS (count)", c30,
+                         "age/sex bands — Rikli & Jones 1999 / CDC STEADI",
+                         "below the age band = elevated fall risk")
+        # Leg power (Alcazar) — needs height + weight entered.
+        pwkg = metrics.get("power_wkg")
+        if pwkg is not None:
+            prisk = ("&#9888; low (men <2.5 / women <2.0 W/kg)" if pwkg < 2.53 else "within range")
+            rows += _row("Leg power", f"{pwkg} W/kg ({metrics.get('power_w'):.0f} W)",
+                         "low: men <2.53, women <2.01 W/kg (Garcia-Aguirre 2025)", prisk)
+        rows += _row("Time per rise", f"{metrics.get('time_per_rep_s')} s" if metrics.get("time_per_rep_s") else None, "≈2–3 s")
         rows += _row("Peak trunk lean (rise)", f"{metrics.get('trunk_peak_mean'):.0f}°" if metrics.get("trunk_peak_mean") is not None else None,
-                     "forward lean to initiate")
+                     "healthy ≈59° at seat-off (Frontiers 2025)")
     else:  # squat
         km = metrics.get("knee_peak_mean")
         rows += _row("Reps detected", n)

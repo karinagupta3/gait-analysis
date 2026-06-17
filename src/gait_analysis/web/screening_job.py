@@ -17,14 +17,22 @@ from pathlib import Path
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if len(argv) < 2:
-        print("usage: screening_job <video> <outdir> [subject] [task]", file=sys.stderr)
+        print("usage: screening_job <video> <outdir> [subject] [task] [height_cm] [weight_kg]",
+              file=sys.stderr)
         return 2
     video, outdir = argv[0], argv[1]
     subject = argv[2] if len(argv) > 2 else ""
     task = argv[3] if len(argv) > 3 else "gait"
 
+    def _num(i):
+        try:
+            return float(argv[i]) if len(argv) > i and argv[i] else None
+        except ValueError:
+            return None
+
     from ..pipeline import run_screening
-    result = run_screening(video, outdir, subject=subject, task=task)
+    result = run_screening(video, outdir, subject=subject, task=task,
+                           height_cm=_num(4), weight_kg=_num(5))
     # Standardize the served filename (the web serves <sid>/report.html).
     Path(outdir, "report.html").write_text(Path(result["report"]).read_text())
     print("screening OK")
