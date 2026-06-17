@@ -1,0 +1,69 @@
+# Tier-2 OpenSim worker image: video -> OpenSim .mot for the 3D modes.
+#
+# OpenSim ships only as a conda package, so it CANNOT go in the slim pip-based
+# tier-1 web image (see ./Dockerfile). This is a SEPARATE, heavier image built on
+# micromamba (a tiny conda) purely to run the queue worker where OpenSim exists.
+#
+# Build for linux/amd64 (OpenSim conda builds target x86_64; ACR runs amd64):
+#   az acr build --platform linux/amd64 -f Dockerfile.worker -t gait-worker:latest .
+FROM --platform=linux/amd64 mambaorg/micromamba:1.5
+
+# micromamba runs as a non-root user; switch to root for system + build steps.
+USER root
+WORKDIR /app
+
+# --- conda layer: python + OpenSim into the base env -------------------------
+# OpenSim comes from the opensim-org channel; conda-forge supplies its deps.
+# Installing into the base env (-n base) keeps CMD simple (no `micromamba run`).
+RUN micromamba install -y -n base -c opensim-org -c conda-forge \
+        python=3.11 opensim \
+    && micromamba clean --all --yes
+
+# Make the base env the default interpreter for every later RUN/CMD.
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+ENV PATH=/opt/conda/bin:$PATH
+
+# --- pip layer: the gait-analysis package + cloud + Pose2Sim deps ------------
+# Copy metadata first so this layer caches unless deps/source change.
+COPY pyproject.toml README.md ./
+COPY src ./src
+# Install the repo (its pinned deps come from pyproject), plus the pieces that
+# are NOT in pyproject's base deps: Pose2Sim (accurate mode) and the Azure SDKs
+# the worker uses to talk to Blob + Queue storage.
+RUN pip install --no-cache-dir . \
+    && pip install --no-cache-dir \
+        pose2sim \
+        azure-storage-blob \
+        azure-storage-queue
+
+# --- model layer: bake in the MARKED OpenSim model ---------------------------
+# The worker needs LaiUhlrich2022_ga.osim (the base model WITH our named markers
+# injected) at GAIT_OSIM_MODEL. We build it at image-build time from the base
+# model using the existing `gait-build-model` console script. If the base model
+# is present under models/ we bake the marked model; otherwise we leave a clear
+# note so the operator commits the model (or a build artifact) before deploying.
+RUN mkdir -p /app/models
+COPY models/ /app/models/
+RUN if [ -f /app/models/LaiUhlrich2022_ga.osim ]; then \
+        echo "Marked model already present; using committed LaiUhlrich2022_ga.osim"; \
+    elif [ -f /app/models/LaiUhlrich2022.osim ]; then \
+        echo "Building marked model from base via gait-build-model ..."; \
+        gait-build-model --base /app/models/LaiUhlrich2022.osim \
+                         --out  /app/models/LaiUhlrich2022_ga.osim; \
+    else \
+        echo "WARNING: no LaiUhlrich2022[_ga].osim under models/. The worker will" \
+             "fail at IK time. Commit the marked model (or the base model so this" \
+             "build step can generate it) before deploying." ; \
+    fi
+
+# Path to the marked model the worker loads (consumed by queue_worker.py).
+ENV GAIT_OSIM_MODEL=/app/models/LaiUhlrich2022_ga.osim
+# Matplotlib needs a writable config dir in the read-only-ish container FS.
+ENV MPLCONFIGDIR=/tmp/mpl
+
+# Drop back to the unprivileged micromamba user for runtime.
+USER mambauser
+
+# Run the tier-2 queue worker. It pulls jobs from the gait-jobs Storage Queue,
+# turns each video into an OpenSim .mot, and uploads results to gait-out.
+CMD ["python", "-m", "gait_analysis.worker.queue_worker"]
