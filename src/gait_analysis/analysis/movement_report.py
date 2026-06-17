@@ -58,13 +58,14 @@ def build_movement_report(metrics: dict, out_html, subject: str = "") -> Path:
     label = TASK_LABEL.get(task, task)
     n = metrics["n_reps"]
     used, total = metrics.get("frames_used", 0), metrics.get("frames_total", 0)
+    meta_line = f"{subject or 'Subject'} · reps: {n} · usable frames: {used}/{total}"
 
     if n == 0:
         body = ('<div style="background:#fee2e2;border:1px solid #ef4444;padding:14px 16px;'
                 'border-radius:8px;font-size:14px"><b>&#9888; No reps detected.</b> Record the '
                 '<b>whole body from the side</b>, fully in frame, performing the movement '
                 f'({"5 rises for 5x sit-to-stand" if task=="sit_to_stand" else "3–5 squat reps"}).</div>')
-        return _write(out_html, _wrap(subject, label, n, used, total, body))
+        return _write(out_html, _wrap(subject, label, meta_line, body))
 
     rows = ""
     if task == "sit_to_stand":
@@ -121,10 +122,10 @@ def build_movement_report(metrics: dict, out_html, subject: str = "") -> Path:
             f"<tbody>{rows}</tbody></table>"
             f"<h2 class='sec'>Joint angles over time</h2>{plot_html}"
             f"{sym_html}")
-    return _write(out_html, _wrap(subject, label, n, used, total, body))
+    return _write(out_html, _wrap(subject, label, meta_line, body))
 
 
-def _wrap(subject, label, n, used, total, body) -> str:
+def _wrap(subject, label, meta_line, body, disclaimer=None) -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{label} screening — {subject or 'Subject'}</title>
 <style>
@@ -138,11 +139,10 @@ def _wrap(subject, label, n, used, total, body) -> str:
  img{{max-width:100%;border:1px solid #eee;border-radius:6px}}
 </style></head><body>
 <h1>{label} Screening Report</h1>
-<div class="meta">{subject or 'Subject'} · reps: {n} · usable frames: {used}/{total}</div>
-<div class="disc"><b>⚠ {DISCLAIMER}</b></div>
+<div class="meta">{meta_line}</div>
+<div class="disc"><b>⚠ {disclaimer or DISCLAIMER}</b></div>
 {body}
-<p class="meta">Method: single-camera 2D pose (MediaPipe BlazePose) → sagittal joint angles + rep
-detection. 5× sit-to-stand norms: Bohannon 2006. Screening tool only.</p>
+<p class="meta">Method: single-camera 2D pose (MediaPipe BlazePose). Screening tool only.</p>
 </body></html>"""
 
 

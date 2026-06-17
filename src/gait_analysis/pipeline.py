@@ -103,7 +103,13 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "",
     np.savez_compressed(outdir / "pose.npz", **d)
     args = (d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]), float(d["fps"]))
     report_out = outdir / "screening_report.html"
-    if task in ("squat", "sit_to_stand"):
+    if task == "tug":
+        from .analysis import tug_2d
+        print("[2/3] TUG metrics (total time, phases, gait speed) ...")
+        metrics = tug_2d.compute_tug_metrics(*args)
+        print("[3/3] TUG report ...")
+        report_path = tug_2d.build_tug_report(metrics, report_out, subject=subject)
+    elif task in ("squat", "sit_to_stand"):
         from .analysis import movement_2d, movement_report
         print(f"[2/3] {task} metrics (reps, depth/timing, symmetry) ...")
         metrics = movement_2d.compute_movement_metrics(

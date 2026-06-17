@@ -275,6 +275,7 @@ def _process_body() -> str:
         '<option value="gait">Walking (gait)</option>'
         '<option value="squat">Squat</option>'
         '<option value="sit_to_stand">Sit-to-stand</option>'
+        '<option value="tug">Timed Up &amp; Go (TUG)</option>'
         '</select></div></div>'
         '<div id="guide" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;'
         'padding:11px 14px;margin-top:14px;font-size:13px;color:#0f172a"></div>'
@@ -297,7 +298,10 @@ def _process_body() -> str:
         'sit_to_stand:"<b>Sit-to-stand</b> &mdash; film the <b>side</b> (profile); keep the whole body '
         '<i>and the chair</i> in frame, arms across chest (no hands). Do <b>5 stand&rarr;sit reps</b> '
         '(timed 5&times; test) <i>or</i> as many as you can in <b>30 s</b>. Enter height &amp; weight to '
-        'also get a leg-power estimate."'
+        'also get a leg-power estimate.",'
+        'tug:"<b>Timed Up &amp; Go</b> &mdash; film from the <b>side</b>, far enough back to keep the '
+        'subject in frame the whole time. Subject sits in a chair, on \\"go\\" stands, walks ~<b>3 m</b>, '
+        'turns, walks back, and sits. Total time is the result (&ge;13.5 s = elevated fall risk)."'
         '};'
         'function updGuide(){var t=document.getElementById("task").value;'
         'document.getElementById("guide").innerHTML=GUIDE[t]||"";'
@@ -752,9 +756,9 @@ def create_app(process_fn=None):
         suffix = Path(video.filename or "input.mov").suffix or ".mov"
         video_path = sdir / f"input{suffix}"
         video_path.write_bytes(await video.read())
-        task = task if task in ("gait", "squat", "sit_to_stand") else "gait"
+        task = task if task in ("gait", "squat", "sit_to_stand", "tug") else "gait"
         trial_full = trial or {"gait": "walk", "squat": "squat",
-                               "sit_to_stand": "sit-to-stand"}.get(task, task)
+                               "sit_to_stand": "sit-to-stand", "tug": "TUG"}.get(task, task)
 
         def _num(s):
             try:
