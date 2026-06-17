@@ -162,17 +162,21 @@ CAPTURE_HTML = """<div class="steps">
 
 
 def _process_body() -> str:
+    # Only offer the 3D mode where OpenSim is actually available (i.e. not the cloud app),
+    # so users aren't given a dead option that always errors.
+    mode_opts = '<option value="screening">2D screening (1 phone, side view)</option>'
+    if _capabilities()["opensim"]:
+        mode_opts += '<option value="quick">3D quick (needs OpenSim model)</option>'
     return (f'<section class="hero"><h1>Process a video</h1>'
-            f'<p class="lead">Single-phone quick mode: video &rarr; pose estimation &rarr; OpenSim &rarr; clinical report.</p></section>'
+            f'<p class="lead">Single-phone 2D screening: a side-view video &rarr; pose estimation &rarr; '
+            f'sagittal knee/hip angles + a synced 3D skeleton. No setup needed.</p></section>'
             f'{_status_banner()}{CAPTURE_HTML}'
             f'<div class="card"><form action="/process" method="post" enctype="multipart/form-data">'
             f'<div class="row2"><div><label>Subject</label><input name="subject" placeholder="e.g. J. Smith"></div>'
-            f'<div><label>Trial label</label><input name="trial" placeholder="e.g. squats"></div></div>'
+            f'<div><label>Trial label</label><input name="trial" placeholder="e.g. walk"></div></div>'
             f'<label>Task hint (optional)</label><input name="trial_hint" placeholder="walking | squat | sit-to-stand">'
             f'<label>Gait speed (m/s, optional)</label><input name="speed" type="number" step="0.01">'
-            f'<label>Mode</label><select name="mode">'
-            f'<option value="screening">2D screening (1 phone, side view)</option>'
-            f'<option value="quick">3D quick (needs OpenSim model)</option></select>'
+            f'<label>Mode</label><select name="mode">{mode_opts}</select>'
             f'<label>Video</label><input name="video" type="file" accept="video/*" required>'
             f'<button class="btn" type="submit">Upload &amp; process</button></form></div>')
 
@@ -194,7 +198,7 @@ def _setup_body() -> str:
 
 
 _JOB_BODY = """<section class="hero"><h1>Processing&hellip; <span id="st" class="badge">queued</span></h1>
-<p class="lead">Pose estimation + OpenSim can take a few minutes. This page updates live and opens the report when done.</p></section>
+<p class="lead">Pose estimation can take a minute or two. This page updates live and opens the report when done.</p></section>
 <div class="err" id="err"></div>
 <div class="card"><pre id="log">starting&hellip;</pre></div>
 <script>
@@ -221,20 +225,31 @@ def _capabilities() -> dict:
 
 def _status_banner() -> str:
     c = _capabilities()
+    check, cross = "&#10003;", "&#10007;"
 
-    def row(ok, label, hint):
-        mark = "&#10003;" if ok else "&#10007;"
-        return f"<div class='{'ok' if ok else 'bad'}'>{mark} {label}{'' if ok else ' &mdash; ' + hint}</div>"
+    # The DEFAULT (and the only cloud-available) mode is single-phone 2D screening, which
+    # needs ONLY MediaPipe. OpenSim + a marked model are used solely by the advanced 3D
+    # mode, so we present them as optional extras — not as a "needs setup" alarm.
+    if c["mediapipe"]:
+        head = "Ready for 2D screening &mdash; single-phone, side-view (the default mode)."
+        bg = "#eafaf1"
+        required = f"<div class='ok'>{check} MediaPipe installed (required for 2D screening)</div>"
+    else:
+        head = "MediaPipe missing &mdash; 2D screening unavailable."
+        bg = "#fdf2e9"
+        required = f"<div class='bad'>{cross} MediaPipe installed &mdash; pip install mediapipe</div>"
 
-    ready = c["opensim"] and c["model"] and c["mediapipe"]
-    rows = (row(c["opensim"], "OpenSim installed", "see setup below")
-            + row(c["mediapipe"], "MediaPipe installed", "pip install mediapipe")
-            + row(bool(c["model"]), "Marked model (GAIT_OSIM_MODEL)",
-                  "file missing" if c["model_set"] else "not set"))
-    head = ("Ready to process video." if ready
-            else "Video processing needs setup (you can still upload a .mot directly).")
-    bg = "#eafaf1" if ready else "#fdf2e9"
-    return f"<div class='banner' style='background:{bg}'><b>{head}</b>{rows}</div>"
+    def opt_row(ok, label):
+        mark = check if ok else "&ndash;"
+        return f"<div class='note' style='margin:2px 0'>{mark} {label}: {'yes' if ok else 'no'}</div>"
+
+    optional = (
+        "<div class='note' style='margin-top:8px;font-weight:600'>Optional &mdash; advanced 3D "
+        "mode only (needs a 2-camera/Pose2Sim setup; not available on the cloud app):</div>"
+        + opt_row(c["opensim"], "OpenSim installed")
+        + opt_row(bool(c["model"]), "Marked model (GAIT_OSIM_MODEL)")
+    )
+    return f"<div class='banner' style='background:{bg}'><b>{head}</b>{required}{optional}</div>"
 
 
 def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
