@@ -36,9 +36,18 @@ DATA_DIR = Path(os.environ.get("GAIT_STORE_DIR", Path(__file__).resolve().parent
 # downloaded server-side and run through 2D screening. URLs are restricted to the hosts
 # below (SSRF guard) — only these clips can be fetched, nothing arbitrary.
 SAMPLE_VIDEOS = [
-    {"id": "mixkit_man", "label": "Man walking (plaza, side view)",
-     "desc": "Full-body profile, ~12 s — the cleanest reference clip.",
+    {"id": "mixkit_man", "label": "Man walking (plaza)",
+     "desc": "Full-body side view, ~12 s — cleanest reference clip.",
      "url": "https://assets.mixkit.co/videos/4855/4855-720.mp4"},
+    {"id": "woman_park", "label": "Woman walking (park path)",
+     "desc": "Full-body side view, ~9 s — tracks cleanly (88% usable).",
+     "url": "https://videos.pexels.com/video-files/5535731/5535731-hd_1920_1080_25fps.mp4"},
+    {"id": "woman_wall", "label": "Woman walking (by wall)",
+     "desc": "Full-body side view, ~8 s.",
+     "url": "https://videos.pexels.com/video-files/6414085/6414085-hd_1920_1080_24fps.mp4"},
+    {"id": "woman_poppy", "label": "Woman walking (long, ~40 s)",
+     "desc": "Full-body side view, many gait cycles — best for a longer trial.",
+     "url": "https://videos.pexels.com/video-files/4812188/4812188-hd_1920_1080_30fps.mp4"},
 ]
 _ALLOWED_SAMPLE_HOSTS = {"assets.mixkit.co", "videos.pexels.com", "upload.wikimedia.org"}
 
