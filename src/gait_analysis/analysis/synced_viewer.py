@@ -239,7 +239,10 @@ if(S){const el=document.getElementById('viz'),W=el.clientWidth,H=el.clientHeight
         lArr[k*6+3]=b?b[0]:NaN;lArr[k*6+4]=b?b[1]:NaN;lArr[k*6+5]=b?b[2]:NaN;}
       lGeo.attributes.position.needsUpdate=true; ctrl.update(); r.render(scene,cam);};
   }}
-function loop(){requestAnimationFrame(loop); draw2d(); render3d();}
+// Re-fit the canvas to the video EVERY frame: the two-pane flex layout and the
+// three.js panel reflow after metadata loads, so a one-time fit() leaves the canvas
+// at a stale size and the skeleton lands offset (e.g. above the person).
+function loop(){requestAnimationFrame(loop); fit(); draw2d(); render3d();}
 fit(); loop();
 </script></body></html>"""
 
