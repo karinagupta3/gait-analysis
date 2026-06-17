@@ -4,9 +4,10 @@
 # tier-1 web image (see ./Dockerfile). This is a SEPARATE, heavier image built on
 # micromamba (a tiny conda) purely to run the queue worker where OpenSim exists.
 #
-# Build for linux/amd64 (OpenSim conda builds target x86_64; ACR runs amd64):
-#   az acr build --platform linux/amd64 -f Dockerfile.worker -t gait-worker:latest .
-FROM --platform=linux/amd64 mambaorg/micromamba:1.5
+# ACR builds linux/amd64 by default (OpenSim conda builds target x86_64), so no
+# --platform flag is needed here (ACR's dependency scanner rejects it on FROM):
+#   az acr build -r <acr> -f Dockerfile.worker -t gait-worker:latest .
+FROM mambaorg/micromamba:1.5
 
 # micromamba runs as a non-root user; switch to root for system + build steps.
 USER root
