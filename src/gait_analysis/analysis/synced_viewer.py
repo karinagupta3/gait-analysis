@@ -70,10 +70,31 @@ def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str) 
             .replace("__SCENE__", json.dumps(scene3d)))
 
 
+def _world_landmarks_to_scene3d(data, min_score: float = 0.3) -> dict:
+    """Build a 3D marker scene from mediapipe world_landmarks stored in a loaded NPZ."""
+    wl = data["world_landmarks"].astype(float)   # (T, 33, 3) hip-centred metres
+    vis = data["visibility"].astype(float) if "visibility" in data else np.ones(wl.shape[:2])
+    fps = float(data.get("fps", 30.0))
+    frames = []
+    for f in range(wl.shape[0]):
+        row = []
+        for j in range(wl.shape[1]):
+            x, y, z = wl[f, j]
+            v = float(vis[f, j])
+            # MediaPipe: x=right, y=down (image), z=depth toward camera
+            # Three.js:  x=right, y=up,           z=toward viewer
+            row.append([round(float(x), 4), round(float(-y), 4), round(float(-z), 4)]
+                       if np.isfinite([x, y, z]).all() and v >= min_score else None)
+        frames.append(row)
+    return {"fps": round(fps, 3), "names": [str(i) for i in range(33)],
+            "links": _BLAZE33, "frames": frames}
+
+
 def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
           max_frames: int = 150, geometry=None) -> Path:
     """Build the synced viewer folder. If model+mot given, the right pane is the OpenSim model
-    (writes geometry/ into out_dir); else if trc given, it's the marker skeleton."""
+    (writes geometry/ into out_dir); else if trc given, it's the marker skeleton; else falls
+    back to the 3D world landmarks from the pose NPZ."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     video_path = Path(video_path)
@@ -89,6 +110,16 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
         mode = "model"
     elif trc_path:
         scene3d, mode = trc_to_scene(trc_path), "markers"
+    else:
+        # Fallback: use 3D world landmarks embedded in the pose NPZ (always available from
+        # mediapipe extraction) — shows the body skeleton without needing TRC or OpenSim.
+        try:
+            d = np.load(npz_path)
+            if "world_landmarks" in d:
+                scene3d = _world_landmarks_to_scene3d(d)
+                mode = "markers"
+        except Exception as exc:
+            print(f"[note] world-landmarks 3D fallback failed: {exc}")
 
     (out_dir / "viewer.html").write_text(synced_html(video_path.name, kpts2d, scene3d, mode))
     print(f"Wrote {out_dir}/viewer.html (right pane: {mode}). "

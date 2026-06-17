@@ -106,7 +106,19 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> d
     print("[3/3] Screening report ...")
     report_path = screening_report.build_screening_report(
         angles, outdir / "screening_report.html", subject=subject)
-    return {"mode": "screening", "angles": angles, "report": str(report_path)}
+
+    # Synced viewer: video with 2D pose overlay (left) + 3D world-landmark skeleton (right).
+    viewer_path = None
+    try:
+        from .analysis import synced_viewer
+        print("[+] Building synced viewer ...")
+        synced_viewer.build(video, outdir / "pose.npz", outdir / "synced")
+        viewer_path = str(outdir / "synced" / "viewer.html")
+    except Exception as exc:
+        print(f"[note] synced viewer skipped: {exc}")
+
+    return {"mode": "screening", "angles": angles, "report": str(report_path),
+            "viewer": viewer_path}
 
 
 def run_accurate(project_dir: str | Path, gait_speed_m_s: float | None = None) -> dict:

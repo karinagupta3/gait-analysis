@@ -23,7 +23,7 @@ from .jobs import JobManager
 # Lazy/guarded FastAPI import so the package imports without the web extra.
 try:
     from fastapi import FastAPI, Form, Request, UploadFile
-    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 except ImportError:  # pragma: no cover - exercised only without the extra
     FastAPI = None  # type: ignore
 
@@ -324,7 +324,28 @@ def create_app(process_fn=None):
         html_path = _store_dir() / sid / "report.html"
         if not html_path.exists():
             return HTMLResponse("<p>Not found. <a href='/'>Back</a></p>", status_code=404)
-        return html_path.read_text()
+        report_html = html_path.read_text()
+        # If synced viewer was built, inject a prominent link at the top of the report.
+        viewer_path = _store_dir() / sid / "synced" / "viewer.html"
+        if viewer_path.exists():
+            banner = (
+                f'<div style="background:#f0f9ff;border:1px solid #bae6fd;padding:11px 16px;'
+                f'border-radius:8px;margin:0 0 14px;font-family:system-ui,Arial,sans-serif;font-size:14px">'
+                f'<a href="/session/{sid}/synced/viewer.html" target="_blank" '
+                f'style="font-weight:600;color:#0369a1;text-decoration:none">'
+                f'&#9654; View synced video + 3D skeleton animation</a>'
+                f'<span style="color:#64748b"> &mdash; pose overlay on video with real-time 3D body model</span>'
+                f'</div>'
+            )
+            report_html = report_html.replace("<body>", "<body>" + banner, 1)
+        return report_html
+
+    @app.get("/session/{sid}/synced/{filename:path}")
+    def session_synced_file(sid: str, filename: str):
+        fpath = _store_dir() / sid / "synced" / filename
+        if not fpath.exists() or not fpath.is_file():
+            return HTMLResponse("<p>Not found</p>", status_code=404)
+        return FileResponse(fpath)
 
     @app.get("/api/sessions")
     def api_sessions():
