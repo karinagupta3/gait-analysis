@@ -30,10 +30,11 @@ def draw_overlay(frame, img_lm, vis, valid):
         cv2.putText(frame, "no reliable pose (subject not fully in frame)", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (60, 60, 220), 2)
         return frame
+    drawn = {i for lk in _BLAZE33 for i in lk}   # gait skeleton only (drop finger/face dots)
     pts = []
     for j in range(img_lm.shape[0]):
         x, y = img_lm[j]
-        pts.append(None if (not np.isfinite([x, y]).all() or vis[j] < MIN_SCORE)
+        pts.append(None if (j not in drawn or not np.isfinite([x, y]).all() or vis[j] < MIN_SCORE)
                    else (int(x * w), int(y * h)))
     for a, b in _BLAZE33:
         if pts[a] and pts[b]:

@@ -50,19 +50,48 @@ def valid_frame_mask(
 ) -> np.ndarray:
     """Boolean (T,) mask of frames usable for sagittal analysis.
 
-    A frame is valid only when the camera-facing hip-knee-ankle chain is (a) detected
-    above ``min_visibility``, (b) fully inside the frame interior (not clipped at an
-    edge), and (c) finite. This rejects the entry/exit frames that produce the
-    scattered "markers are off" poses.
+    A frame is valid only when the camera-facing hip-knee-ankle chain is:
+      (a) detected above ``min_visibility`` and finite;
+      (b) fully inside the frame interior (not clipped at an edge);
+      (c) anatomically plausible — vertically ordered (hip above knee above ankle)
+          with thigh and shank each a reasonable fraction of the trunk length.
+
+    (c) is essential: when the legs are out of frame, MediaPipe still HALLUCINATES the
+    hip/knee/ankle at plausible in-frame coordinates with moderate confidence, so the
+    visibility + bounds tests alone pass a scrambled, collapsed leg. The geometry test
+    rejects those — a real walking leg is long and ordered; a hallucinated one is bunched.
     """
     side = side or _pick_side(visibility)
-    idxs = [_IDX[f"{side}_{j}"] for j in _CHAIN]
-    xy = image_landmarks[:, idxs, :].astype(float)          # (T, 3, 2)
+    I = lambda j: _IDX[f"{side}_{j}"]
+    hip_i, knee_i, ankle_i, sh_i = I("hip"), I("knee"), I("ankle"), I("shoulder")
+    xy = image_landmarks.astype(float)
+    idxs = [hip_i, knee_i, ankle_i]
+
+    # (a) confidence + finite
     vis_ok = np.min(visibility[:, idxs], axis=1) >= min_visibility
-    finite = np.all(np.isfinite(xy), axis=(1, 2))
-    safe = np.where(np.isfinite(xy), xy, 0.5)               # avoid NaN in the bounds test
+    pts = xy[:, idxs, :]
+    finite = np.all(np.isfinite(pts), axis=(1, 2))
+
+    # (b) inside the frame interior
+    safe = np.where(np.isfinite(pts), pts, 0.5)
     inside = np.all((safe >= edge_margin) & (safe <= 1.0 - edge_margin), axis=(1, 2))
-    return vis_ok & finite & inside
+
+    # (c) anatomical plausibility
+    hip, knee, ankle, sh = xy[:, hip_i], xy[:, knee_i], xy[:, ankle_i], xy[:, sh_i]
+    ordered = (knee[:, 1] > hip[:, 1]) & (ankle[:, 1] > knee[:, 1])   # image y grows downward
+    trunk = np.linalg.norm(hip - sh, axis=1)
+    thigh = np.linalg.norm(knee - hip, axis=1)
+    shank = np.linalg.norm(ankle - knee, axis=1)
+    trunk_reliable = (visibility[:, sh_i] >= min_visibility) & (trunk > 1e-3)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        scale_ok = np.where(
+            trunk_reliable,
+            (thigh >= 0.4 * trunk) & (shank >= 0.4 * trunk),
+            np.abs(ankle[:, 1] - hip[:, 1]) >= 0.20,   # fallback: leg spans >=20% of frame
+        )
+    plausible = ordered & np.nan_to_num(scale_ok, nan=False).astype(bool)
+
+    return vis_ok & finite & inside & plausible
 
 
 def smooth_along_time(arr: np.ndarray, win: int = 5) -> np.ndarray:

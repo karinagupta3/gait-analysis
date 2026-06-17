@@ -69,6 +69,25 @@ def build_screening_report(result: dict, out_html: str | Path, subject: str = ""
     rows = "".join(_row(k, result.get(k)) for k in ("knee_flexion", "hip_flexion", "ankle_dorsiflexion"))
     plot = _plot_b64(result.get("_series", {}))
     used, total = result.get("frames_used", 0), result.get("frames_total", 0)
+
+    # Guard: an unsuitable video (e.g. a chest-up clip with no legs, or the subject never
+    # fully in frame) yields zero usable frames. Say so plainly instead of an empty table.
+    unusable = ""
+    if used == 0:
+        unusable = (
+            '<div style="background:#fee2e2;border:1px solid #ef4444;padding:14px 16px;'
+            'border-radius:8px;margin:12px 0;font-size:14px"><b>&#9888; No usable frames.</b> '
+            'The pose model never saw a full, in-frame leg (hip&ndash;knee&ndash;ankle) from the side. '
+            'For a screening, record the <b>whole body</b> (head to feet) from the <b>side</b>, '
+            '~3&ndash;4&nbsp;m away, with the subject fully in frame for the whole walk.</div>'
+        )
+    elif total and used / total < 0.15:
+        unusable = (
+            f'<div style="background:#fef3c7;border:1px solid #f59e0b;padding:12px 16px;'
+            f'border-radius:8px;margin:12px 0;font-size:14px"><b>&#9888; Few usable frames '
+            f'({used}/{total}).</b> Results are based on a short clean segment; for a more '
+            f'reliable screening, keep the whole body in frame from the side for the entire walk.</div>'
+        )
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Gait Screening — {subject or 'Subject'}</title>
 <style>
@@ -80,6 +99,7 @@ def build_screening_report(result: dict, out_html: str | Path, subject: str = ""
 </style></head><body>
 <h1>Gait Screening Report</h1>
 <div class="meta">{subject or 'Subject'} · side analyzed: <b>{result.get('side','?')}</b> · frames used: {used}/{total}</div>
+{unusable}
 <div class="disc"><b>⚠ {DISCLAIMER}</b></div>
 <table><thead><tr><th>Joint (sagittal)</th><th>Measured</th><th>Typical (level walking)</th><th>Screening note</th></tr></thead>
 <tbody>{rows}</tbody></table>

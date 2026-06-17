@@ -17,7 +17,15 @@ def _save_rtmpose_npz(path, T=30):
 
 def _save_mediapipe_npz(path, T=30):
     rng = np.random.default_rng(1)
-    il = rng.uniform(0, 1, (T, 33, 2)).astype(np.float32)   # normalized
+    il = rng.uniform(0.35, 0.65, (T, 33, 2)).astype(np.float32)   # normalized, all in-frame
+    # Plant an anatomically-plausible, in-frame standing pose (shoulders/hips/knees/ankles)
+    # so the frame-validity gate keeps these frames; the gate rejects unstructured noise.
+    base = {11: (0.50, 0.30), 12: (0.50, 0.30),   # shoulders
+            23: (0.50, 0.52), 24: (0.50, 0.52),   # hips
+            25: (0.50, 0.72), 26: (0.50, 0.72),   # knees
+            27: (0.50, 0.92), 28: (0.50, 0.92)}   # ankles
+    for j, (x, y) in base.items():
+        il[:, j, 0], il[:, j, 1] = x, y
     np.savez(path, world_landmarks=rng.uniform(-1, 1, (T, 33, 3)).astype(np.float32),
              visibility=np.full((T, 33), 0.9, np.float32), image_landmarks=il,
              fps=np.float32(60), width=np.int32(1280), height=np.int32(720))

@@ -60,6 +60,11 @@ def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
     else:
         raise ValueError("npz lacks 'keypoints' (rtmpose) or 'image_landmarks' (mediapipe)")
 
+    # Draw only joints that are part of the skeleton — drops MediaPipe's finger/face
+    # detail points (17-22, 1-10) that otherwise render as a loose dot cluster near the
+    # hands/head and read as "markers are off".
+    drawn = {i for lk in links for i in lk}
+
     frames = []
     for f in range(kp.shape[0]):
         if frame_valid is not None and not frame_valid[f]:
@@ -68,7 +73,7 @@ def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
         row = []
         for j in range(kp.shape[1]):
             x, y = kp[f, j]
-            row.append(None if (not np.isfinite([x, y]).all() or sc[f, j] < min_score)
+            row.append(None if (j not in drawn or not np.isfinite([x, y]).all() or sc[f, j] < min_score)
                        else [round(float(x), 1), round(float(y), 1)])
         frames.append(row)
     return {"fps": round(fps, 3), "w": w, "h": h, "links": links, "frames": frames}
@@ -95,6 +100,7 @@ def _world_landmarks_to_scene3d(data, min_score: float = 0.5) -> dict:
     fps = float(data["fps"]) if "fps" in data else 30.0
     frame_valid = (valid_frame_mask(data["image_landmarks"].astype(float), vis)
                    if "image_landmarks" in data else None)
+    drawn = {i for lk in _BLAZE33 for i in lk}   # gait skeleton only (drop finger/face dots)
     frames = []
     for f in range(wl.shape[0]):
         if frame_valid is not None and not frame_valid[f]:
@@ -107,7 +113,7 @@ def _world_landmarks_to_scene3d(data, min_score: float = 0.5) -> dict:
             # MediaPipe: x=right, y=down (image), z=depth toward camera
             # Three.js:  x=right, y=up,           z=toward viewer
             row.append([round(float(x), 4), round(float(-y), 4), round(float(-z), 4)]
-                       if np.isfinite([x, y, z]).all() and v >= min_score else None)
+                       if j in drawn and np.isfinite([x, y, z]).all() and v >= min_score else None)
         frames.append(row)
     return {"fps": round(fps, 3), "names": [str(i) for i in range(33)],
             "links": _BLAZE33, "frames": frames}
