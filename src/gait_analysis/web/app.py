@@ -11,9 +11,12 @@ Install: pip install -e ".[web]"   Run: gait-web   (then open http://127.0.0.1:8
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
+import hmac
 import json
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -54,6 +57,47 @@ _ALLOWED_SAMPLE_HOSTS = {"assets.mixkit.co", "videos.pexels.com", "upload.wikime
 
 def _sample_by_id(sid: str) -> dict | None:
     return next((s for s in SAMPLE_VIDEOS if s["id"] == sid), None)
+
+
+# --- Authentication (app-level shared password) ------------------------------
+# When GAIT_AUTH_PASSWORD is set, every page requires a signed session cookie
+# obtained by entering the password at /login. When it is UNSET, auth is disabled
+# (local dev + tests run open). /login and /health stay reachable so the sign-in
+# page works and Azure's health probe isn't blocked.
+AUTH_PASSWORD = os.environ.get("GAIT_AUTH_PASSWORD") or ""
+AUTH_SECRET = (os.environ.get("GAIT_SECRET_KEY") or "dev-insecure-key").encode()
+_COOKIE = "gait_session"
+_SESSION_TTL = 12 * 3600  # seconds (re-login after a shift)
+_OPEN_PATHS = {"/login", "/health"}
+
+
+def _auth_enabled() -> bool:
+    return bool(AUTH_PASSWORD)
+
+
+def _make_session_token() -> str:
+    exp = str(int(time.time()) + _SESSION_TTL)
+    sig = hmac.new(AUTH_SECRET, exp.encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}"
+
+
+def _valid_session(token: str) -> bool:
+    try:
+        exp, sig = token.split(".", 1)
+        good = hmac.new(AUTH_SECRET, exp.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(sig, good) and int(exp) > time.time()
+    except Exception:
+        return False
+
+
+_LOGIN_BODY = """<section class="hero"><h1>Sign in</h1>
+<p class="lead">This tool is restricted to clinic staff.</p></section>
+<!--err-->
+<div class="card" style="max-width:420px">
+<form action="/login" method="post">
+  <label>Password</label><input name="password" type="password" autofocus required>
+  <button class="btn" type="submit">Sign in</button>
+</form></div>"""
 
 
 def _store_dir() -> Path:
@@ -126,7 +170,8 @@ def _shell(title: str, body: str, active: str = "") -> str:
             f'<title>{title}</title><style>{BASE_CSS}</style></head><body>'
             f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait Analysis</a>'
             f'<nav>{nav("/process", "Process video", "process")}{nav("/record", "Record (phone)", "record")}'
-            f'{nav("/samples", "Samples", "samples")}{nav("/setup", "Setup", "setup")}</nav></div></header>'
+            f'{nav("/samples", "Samples", "samples")}{nav("/setup", "Setup", "setup")}'
+            f'{nav("/logout", "Sign out", "") if _auth_enabled() else ""}</nav></div></header>'
             f'<main>{body}</main>'
             f'<footer>Gait Analysis · clinical kinematics from OpenSim</footer></body></html>')
 
@@ -417,6 +462,37 @@ def create_app(process_fn=None):
     app = FastAPI(title="Gait Analysis")
     jm = JobManager()
     process_fn = process_fn or _default_process
+
+    @app.middleware("http")
+    async def _require_auth(request: Request, call_next):
+        # No-op when auth is disabled (no password configured).
+        if _auth_enabled() and request.url.path not in _OPEN_PATHS:
+            if not _valid_session(request.cookies.get(_COOKIE, "")):
+                if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+                    return RedirectResponse("/login", status_code=303)
+                return JSONResponse({"error": "authentication required"}, status_code=401)
+        return await call_next(request)
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_form():
+        return _shell("Sign in", _LOGIN_BODY.replace("<!--err-->", ""), "")
+
+    @app.post("/login")
+    def login_submit(password: str = Form("")):
+        if _auth_enabled() and hmac.compare_digest(password, AUTH_PASSWORD):
+            r = RedirectResponse("/", status_code=303)
+            r.set_cookie(_COOKIE, _make_session_token(), max_age=_SESSION_TTL,
+                         httponly=True, secure=True, samesite="lax")
+            return r
+        err = "<p class='err'>Incorrect password.</p>"
+        return HTMLResponse(_shell("Sign in", _LOGIN_BODY.replace("<!--err-->", err), ""),
+                            status_code=401)
+
+    @app.get("/logout")
+    def logout():
+        r = RedirectResponse("/login", status_code=303)
+        r.delete_cookie(_COOKIE)
+        return r
 
     @app.get("/health")
     def health():
