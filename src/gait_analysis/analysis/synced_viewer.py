@@ -32,26 +32,39 @@ _BLAZE33 = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24)
             (26, 28), (28, 30), (30, 32), (28, 32), (0, 11), (0, 12)]
 
 
-def kpts2d_from_npz(npz_path, min_score: float = 0.3) -> dict:
-    """2D overlay scene: per-frame pixel keypoints + skeleton links + video dimensions."""
+def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
+    """2D overlay scene: per-frame pixel keypoints + skeleton links + video dimensions.
+
+    For mediapipe input, whole frames where the body is clipped/low-confidence (the
+    subject entering or leaving the frame) are blanked, and the kept frames are
+    de-jittered, so the overlay only ever shows clean tracking.
+    """
     data = np.load(npz_path)
     w, h = int(data["width"]), int(data["height"])
     fps = float(data["fps"]) or 30.0
+    frame_valid = None
     if "keypoints" in data:                       # rtmpose COCO-17, pixel coords
         kp = data["keypoints"].astype(float)
         sc = data["scores"].astype(float) if "scores" in data else np.ones(kp.shape[:2])
         links = _COCO17
     elif "image_landmarks" in data:               # mediapipe BlazePose-33, normalized
-        kp = data["image_landmarks"].astype(float)
+        from .sagittal2d import smooth_along_time, valid_frame_mask
+        norm = data["image_landmarks"].astype(float)
+        sc = data["visibility"].astype(float) if "visibility" in data else np.ones(norm.shape[:2])
+        frame_valid = valid_frame_mask(norm, sc)          # drop entry/exit junk frames
+        norm = smooth_along_time(norm)                    # de-jitter the kept frames
+        kp = norm
         kp[..., 0] *= w
         kp[..., 1] *= h
-        sc = data["visibility"].astype(float) if "visibility" in data else np.ones(kp.shape[:2])
         links = _BLAZE33
     else:
         raise ValueError("npz lacks 'keypoints' (rtmpose) or 'image_landmarks' (mediapipe)")
 
     frames = []
     for f in range(kp.shape[0]):
+        if frame_valid is not None and not frame_valid[f]:
+            frames.append([None] * kp.shape[1])           # blank: don't draw on junk frames
+            continue
         row = []
         for j in range(kp.shape[1]):
             x, y = kp[f, j]
@@ -70,13 +83,23 @@ def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str) 
             .replace("__SCENE__", json.dumps(scene3d)))
 
 
-def _world_landmarks_to_scene3d(data, min_score: float = 0.3) -> dict:
-    """Build a 3D marker scene from mediapipe world_landmarks stored in a loaded NPZ."""
-    wl = data["world_landmarks"].astype(float)   # (T, 33, 3) hip-centred metres
+def _world_landmarks_to_scene3d(data, min_score: float = 0.5) -> dict:
+    """Build a 3D marker scene from mediapipe world_landmarks stored in a loaded NPZ.
+
+    Uses the SAME frame-validity gate as the 2D overlay so the 3D body and the video
+    skeleton appear/disappear together, and de-jitters the kept frames.
+    """
+    from .sagittal2d import smooth_along_time, valid_frame_mask
+    wl = smooth_along_time(data["world_landmarks"].astype(float))   # (T,33,3) hip-centred m
     vis = data["visibility"].astype(float) if "visibility" in data else np.ones(wl.shape[:2])
-    fps = float(data.get("fps", 30.0))
+    fps = float(data["fps"]) if "fps" in data else 30.0
+    frame_valid = (valid_frame_mask(data["image_landmarks"].astype(float), vis)
+                   if "image_landmarks" in data else None)
     frames = []
     for f in range(wl.shape[0]):
+        if frame_valid is not None and not frame_valid[f]:
+            frames.append([None] * wl.shape[1])
+            continue
         row = []
         for j in range(wl.shape[1]):
             x, y, z = wl[f, j]

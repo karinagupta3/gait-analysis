@@ -34,6 +34,56 @@ def _pick_side(vis: np.ndarray) -> str:
     return "right" if r >= l else "left"
 
 
+# Sagittal chain that must be confidently detected AND inside the frame for a frame
+# to be usable. This is the key quality gate: as the subject ENTERS or LEAVES the
+# frame, MediaPipe still returns a (wrong, low-confidence) pose with scattered
+# markers — those frames must be rejected from both the angles and the overlay.
+_CHAIN = ("hip", "knee", "ankle")
+
+
+def valid_frame_mask(
+    image_landmarks: np.ndarray,   # (T,33,2) normalised 0..1
+    visibility: np.ndarray,        # (T,33)
+    side: str | None = None,
+    min_visibility: float = 0.5,
+    edge_margin: float = 0.03,
+) -> np.ndarray:
+    """Boolean (T,) mask of frames usable for sagittal analysis.
+
+    A frame is valid only when the camera-facing hip-knee-ankle chain is (a) detected
+    above ``min_visibility``, (b) fully inside the frame interior (not clipped at an
+    edge), and (c) finite. This rejects the entry/exit frames that produce the
+    scattered "markers are off" poses.
+    """
+    side = side or _pick_side(visibility)
+    idxs = [_IDX[f"{side}_{j}"] for j in _CHAIN]
+    xy = image_landmarks[:, idxs, :].astype(float)          # (T, 3, 2)
+    vis_ok = np.min(visibility[:, idxs], axis=1) >= min_visibility
+    finite = np.all(np.isfinite(xy), axis=(1, 2))
+    safe = np.where(np.isfinite(xy), xy, 0.5)               # avoid NaN in the bounds test
+    inside = np.all((safe >= edge_margin) & (safe <= 1.0 - edge_margin), axis=(1, 2))
+    return vis_ok & finite & inside
+
+
+def smooth_along_time(arr: np.ndarray, win: int = 5) -> np.ndarray:
+    """Centered moving average over axis 0, ignoring NaN (reduces marker jitter).
+
+    Returns a float copy; positions that are NaN across the whole window stay NaN.
+    """
+    arr = np.asarray(arr, dtype=float)
+    T = arr.shape[0]
+    if win < 2 or T < win:
+        return arr.copy()
+    half = win // 2
+    out = np.empty_like(arr)
+    for t in range(T):
+        lo, hi = max(0, t - half), min(T, t + half + 1)
+        seg = arr[lo:hi]
+        with np.errstate(invalid="ignore"):
+            out[t] = np.nanmean(seg, axis=0) if np.isfinite(seg).any() else arr[t]
+    return out
+
+
 def compute_sagittal_angles(
     image_landmarks: np.ndarray,   # (T,33,2) normalised 0..1
     visibility: np.ndarray,        # (T,33)
@@ -59,8 +109,10 @@ def compute_sagittal_angles(
     hip_flex = np.degrees(np.arctan2(thigh[:, 0], thigh[:, 1]))  # signed: +anterior swing
     ankle_dorsi = _angle_at(ankle, knee, foot) - 90.0        # ~0 neutral, + dorsiflexion
 
-    # Mask frames where any contributing joint is low-confidence.
-    good = np.minimum.reduce([v("hip"), v("knee"), v("ankle")]) >= min_visibility
+    # Reject frames where the body is clipped at an edge or low-confidence (entry/exit
+    # of the walk) — these produce the scattered, wrong poses. This is stricter than a
+    # per-joint visibility test: it also requires the chain to be fully inside the frame.
+    good = valid_frame_mask(image_landmarks, visibility, side, min_visibility)
     for arr in (knee_flex, hip_flex, ankle_dorsi):
         arr[~good] = np.nan
 
