@@ -13,6 +13,11 @@ FROM mambaorg/micromamba:1.5
 USER root
 WORKDIR /app
 
+# System libs MediaPipe needs at runtime (OpenGL/EGL) + curl, same as tier-1.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libgles2 libegl1 curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- conda layer: python + OpenSim into the base env -------------------------
 # OpenSim comes from the opensim-org channel; conda-forge supplies its deps.
 # Installing into the base env (-n base) keeps CMD simple (no `micromamba run`).
@@ -33,6 +38,7 @@ COPY src ./src
 # the worker uses to talk to Blob + Queue storage.
 RUN pip install --no-cache-dir . \
     && pip install --no-cache-dir \
+        mediapipe \
         pose2sim \
         azure-storage-blob \
         azure-storage-queue
@@ -57,8 +63,14 @@ RUN if [ -f /app/models/LaiUhlrich2022_ga.osim ]; then \
              "build step can generate it) before deploying." ; \
     fi
 
-# Path to the marked model the worker loads (consumed by queue_worker.py).
+# MediaPipe pose-landmarker model — "quick" mode runs the full pose->IK chain in
+# the worker, so it needs the same .task model the tier-1 screening uses.
+RUN curl -L -o /app/models/pose_landmarker_heavy.task \
+    https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task
+
+# Paths the worker loads (consumed by queue_worker.py / pipeline.run_quick).
 ENV GAIT_OSIM_MODEL=/app/models/LaiUhlrich2022_ga.osim
+ENV GAIT_POSE_TASK_MODEL=/app/models/pose_landmarker_heavy.task
 # Matplotlib needs a writable config dir in the read-only-ish container FS.
 ENV MPLCONFIGDIR=/tmp/mpl
 

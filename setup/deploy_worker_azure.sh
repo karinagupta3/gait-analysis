@@ -54,8 +54,13 @@ az storage container create -n "$IN_CONTAINER"  --connection-string "$CONN" -o n
 az storage container create -n "$OUT_CONTAINER" --connection-string "$CONN" -o none
 az storage queue create     -n "$QUEUE"         --connection-string "$CONN" -o none
 
-echo ">> [3/5] build the worker image in ACR (uses Dockerfile.worker, linux/amd64)"
-az acr build -r "$ACR" --platform linux/amd64 -f Dockerfile.worker -t "$IMAGE" .
+echo ">> [3/5] build the worker image in ACR (uses Dockerfile.worker; ACR defaults to linux/amd64)"
+# Skip with SKIP_BUILD=1 when the image is already current in ACR.
+if [ "${SKIP_BUILD:-}" = "1" ]; then
+  echo "   SKIP_BUILD=1 -> reusing existing $IMAGE in $ACR"
+else
+  az acr build -r "$ACR" -f Dockerfile.worker -t "$IMAGE" .
+fi
 
 echo ">> [4/5] ensure the Container Apps environment exists"
 az containerapp env show -n "$ENVN" -g "$RG" >/dev/null 2>&1 \

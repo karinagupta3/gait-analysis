@@ -21,6 +21,8 @@ import uuid
 from pathlib import Path
 
 from ..analysis import report
+from . import dispatch, twophone
+from .capture_page import CAPTURE_BODY
 from .jobs import JobManager
 
 # Lazy/guarded FastAPI import so the package imports without the web extra.
@@ -170,7 +172,8 @@ def _shell(title: str, body: str, active: str = "") -> str:
             f'<title>{title}</title><style>{BASE_CSS}</style></head><body>'
             f'<header><div class="bar"><a class="brand" href="/"><span class="logo"></span>Gait Analysis</a>'
             f'<nav>{nav("/process", "Process video", "process")}{nav("/record", "Record (phone)", "record")}'
-            f'{nav("/samples", "Samples", "samples")}{nav("/setup", "Setup", "setup")}'
+            f'{nav("/capture", "2-phone", "capture")}{nav("/samples", "Samples", "samples")}'
+            f'{nav("/setup", "Setup", "setup")}'
             f'{nav("/logout", "Sign out", "") if _auth_enabled() else ""}</nav></div></header>'
             f'<main>{body}</main>'
             f'<footer>Gait Analysis · clinical kinematics from OpenSim</footer></body></html>')
@@ -233,8 +236,9 @@ def _process_body() -> str:
     # Only offer the 3D mode where OpenSim is actually available (i.e. not the cloud app),
     # so users aren't given a dead option that always errors.
     mode_opts = '<option value="screening">2D screening (1 phone, side view)</option>'
-    if _capabilities()["opensim"]:
-        mode_opts += '<option value="quick">3D quick (needs OpenSim model)</option>'
+    if _capabilities()["opensim"] or dispatch.storage_configured():
+        mode_opts += ('<option value="quick">3D (OpenSim) — experimental; '
+                      'single-camera depth is approximate</option>')
     return (f'<section class="hero"><h1>Process a video</h1>'
             f'<p class="lead">Single-phone 2D screening: a side-view video &rarr; pose estimation &rarr; '
             f'sagittal knee/hip angles + a synced 3D skeleton. No setup needed.</p></section>'
@@ -439,10 +443,41 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
 
     if mode != "quick":
         raise RuntimeError("Only screening (2D) and quick (3D) modes are wired into the app; "
-                           "use the CLI for accurate 2-phone (Pose2Sim) capture.")
+                           "use the 2-phone capture page for accurate (Pose2Sim) 3D.")
+
+    # 3D quick mode: prefer the tier-2 OpenSim worker (the slim cloud image has no
+    # OpenSim). Upload the video, enqueue a job, and poll the worker's status.json.
+    if dispatch.storage_configured():
+        import time as _t
+        ext = video_path.suffix.lstrip(".") or "mp4"
+        job.log.append("dispatching 3D job to the OpenSim worker (tier-2) ...")
+        dispatch.dispatch_job(sdir.name, video_path, "quick", ext, speed=meta.get("speed"))
+        deadline = _t.time() + 1800           # 30 min cap
+        last = None
+        while True:
+            stt = dispatch.poll_status(sdir.name)
+            state = stt.get("state")
+            if state != last:
+                job.log.append(f"worker: {state}")
+                last = state
+            if state == "done":
+                dispatch.fetch_outputs(sdir.name, sdir)
+                break
+            if state == "error":
+                raise RuntimeError("worker: " + stt.get("error", "3D processing failed"))
+            if _t.time() > deadline:
+                raise RuntimeError("3D worker timed out (30 min). Try a shorter clip.")
+            _t.sleep(3)
+        if not (sdir / "report.html").exists():
+            raise RuntimeError("worker finished but returned no report")
+        (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
+        return sdir.name
+
+    # Local fallback: only where OpenSim is actually installed.
     model = os.environ.get("GAIT_OSIM_MODEL")
     if not model:
-        raise RuntimeError("Set GAIT_OSIM_MODEL to your marked .osim (see docs/03).")
+        raise RuntimeError("3D needs either the cloud worker (set GAIT_STORAGE_CONNECTION) "
+                           "or local OpenSim + GAIT_OSIM_MODEL.")
 
     from ..pipeline import run_quick
     job.log.append("running MediaPipe 3D -> .trc -> OpenSim IK ...")
@@ -587,6 +622,67 @@ def create_app(process_fn=None):
         (sdir / "meta.json").write_text(json.dumps({**meta, "state": "processing"}))
         jid = jm.submit(lambda job: _sample_process(job, s["url"], sdir, meta))
         return RedirectResponse(f"/job/{jid}", status_code=303)
+
+    # --- two-phone (accurate 3D) capture: collect 4 clips, then process ---
+
+    @app.get("/capture", response_class=HTMLResponse)
+    def capture_page():
+        return _shell("Capture (2 phones)", CAPTURE_BODY, "capture")
+
+    @app.post("/capture-upload")
+    async def capture_upload(video: UploadFile, code: str = Form(...),
+                             role: str = Form(...), kind: str = Form(...)):
+        ext = (Path(video.filename or "clip.webm").suffix or ".webm").lstrip(".")
+        try:
+            twophone.save_clip(code, role, kind, await video.read(), ext)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        s = twophone.session_status(code)
+        return JSONResponse({"received": s["present"], "ready": s["ready"], "missing": s["missing"]})
+
+    @app.get("/capture-status")
+    def capture_status(code: str):
+        try:
+            s = twophone.session_status(code)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"received": s["present"], "ready": s["ready"], "missing": s["missing"]})
+
+    @app.post("/capture-run")
+    def capture_run(code: str = Form(...)):
+        s = twophone.session_status(code)
+        if not s.get("ready"):
+            body = (f"<section class='hero'><h1>Not ready</h1><p class='lead'>Session "
+                    f"<b>{code}</b> still needs: {', '.join(s.get('missing', [])) or 'unknown'}. "
+                    f"<a href='/capture'>Back to capture</a></p></section>")
+            return HTMLResponse(_shell("Capture", body, "capture"), status_code=400)
+        # The 4 clips are saved. Pose2Sim+OpenSim 3D runs where OpenSim exists (the
+        # tier-2 worker / local dev). On the slim cloud app we stage + explain.
+        if _capabilities()["opensim"]:
+            sid = uuid.uuid4().hex[:8]
+            sdir = _store_dir() / sid
+            sdir.mkdir(parents=True, exist_ok=True)
+
+            def _run(job):
+                job.log.append(f"two-phone {code}: Pose2Sim triangulation + OpenSim IK ...")
+                res = twophone.run_session(code, trial=f"two-phone {code}")
+                rep = res.get("report")
+                if rep and Path(rep).exists():
+                    (sdir / "report.html").write_bytes(Path(rep).read_bytes())
+                (sdir / "meta.json").write_text(json.dumps(
+                    {"id": sid, "subject": "two-phone", "trial": code,
+                     "created": _dt.datetime.now().isoformat()}))
+                return sid
+            jid = jm.submit(_run)
+            return RedirectResponse(f"/job/{jid}", status_code=303)
+        body = (f"<section class='hero'><h1>Trial captured &#10003;</h1>"
+                f"<p class='lead'>All 4 clips for session <b>{code}</b> are saved.</p></section>"
+                f"<div class='banner' style='background:#eff6ff;border-color:#bae6fd'>"
+                f"<b>Next: 3D processing</b>Two-phone 3D (Pose2Sim triangulation &rarr; OpenSim) "
+                f"runs on the OpenSim worker — that cloud step is the next piece being wired. Your "
+                f"capture is saved. Single-phone 2D screening works now via "
+                f"<a href='/process'>Process video</a>.</div>")
+        return HTMLResponse(_shell("Capture", body, "capture"))
 
     @app.post("/process")
     async def process(video: UploadFile, subject: str = Form(""), trial: str = Form(""),

@@ -7,3 +7,6 @@ matplotlib>=3.7
 # Single-phone 2D screening (pose extraction). mediapipe pulls its own opencv (needs
 # libgl1/libglib2.0-0 system libs, installed in the Dockerfile).
 mediapipe>=0.10
+# Dispatch 3D jobs to the tier-2 OpenSim worker (upload to Blob + enqueue on Queue).
+azure-storage-blob>=12
+azure-storage-queue>=12
