@@ -242,12 +242,23 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
     mode = meta.get("mode") or "screening"
     job.log.append(f"mode={mode}: starting")
 
-    # Single-phone 2D sagittal screening: no OpenSim/model needed.
+    # Single-phone 2D sagittal screening: no OpenSim/model needed. Runs in a SUBPROCESS
+    # so the heavy MediaPipe pass can't starve the uvicorn event loop (keeps the web
+    # responsive — /health and status polls stay up while a job runs).
     if mode == "screening":
-        from ..pipeline import run_screening
-        job.log.append("MediaPipe pose -> 2D sagittal screening ...")
-        result = run_screening(video_path, sdir, subject=meta.get("subject") or "")
-        (sdir / "report.html").write_text(Path(result["report"]).read_text())  # serve via /session
+        import subprocess
+        import sys as _sys
+        job.log.append("MediaPipe pose -> 2D sagittal screening (subprocess) ...")
+        proc = subprocess.run(
+            [_sys.executable, "-m", "gait_analysis.web.screening_job",
+             str(video_path), str(sdir), meta.get("subject") or ""],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            raise RuntimeError("screening failed: " + (tail[-1] if tail else "unknown error"))
+        if not (sdir / "report.html").exists():
+            raise RuntimeError("screening produced no report")
         (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
         return sdir.name
 
