@@ -7,7 +7,10 @@ env/
 __pycache__/
 **/__pycache__/
 *.pyc
-models/
+models/*
+# ...but DO include the two OpenSim models so the tier-2 worker image can bake them.
+!models/LaiUhlrich2022.osim
+!models/LaiUhlrich2022_ga.osim
 data/
 outputs/
 *.mov

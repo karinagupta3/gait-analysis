@@ -43,7 +43,7 @@ RUN pip install --no-cache-dir . \
 # is present under models/ we bake the marked model; otherwise we leave a clear
 # note so the operator commits the model (or a build artifact) before deploying.
 RUN mkdir -p /app/models
-COPY models/ /app/models/
+COPY models/LaiUhlrich2022.osim models/LaiUhlrich2022_ga.osim /app/models/
 RUN if [ -f /app/models/LaiUhlrich2022_ga.osim ]; then \
         echo "Marked model already present; using committed LaiUhlrich2022_ga.osim"; \
     elif [ -f /app/models/LaiUhlrich2022.osim ]; then \

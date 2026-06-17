@@ -93,19 +93,19 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> d
     """
     import numpy as np
     from .pose import mediapipe3d
-    from .analysis import sagittal2d, screening_report
+    from .analysis import gait_metrics_2d, screening_report
 
     video, outdir = Path(video), Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     print("[1/3] MediaPipe pose ...")
     d = mediapipe3d.extract_world_landmarks(video)
     np.savez_compressed(outdir / "pose.npz", **d)
-    print("[2/3] Sagittal angles ...")
-    angles = sagittal2d.compute_sagittal_angles(
-        d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]))
+    print("[2/3] Gait metrics (both legs: cadence, strides, per-stride peaks, symmetry) ...")
+    metrics = gait_metrics_2d.compute_gait_metrics(
+        d["image_landmarks"], d["visibility"], int(d["width"]), int(d["height"]), float(d["fps"]))
     print("[3/3] Screening report ...")
     report_path = screening_report.build_screening_report(
-        angles, outdir / "screening_report.html", subject=subject)
+        metrics, outdir / "screening_report.html", subject=subject)
 
     # Synced viewer: video with 2D pose overlay (left) + 3D world-landmark skeleton (right).
     viewer_path = None
@@ -117,7 +117,7 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "") -> d
     except Exception as exc:
         print(f"[note] synced viewer skipped: {exc}")
 
-    return {"mode": "screening", "angles": angles, "report": str(report_path),
+    return {"mode": "screening", "metrics": metrics, "report": str(report_path),
             "viewer": viewer_path}
 
 
