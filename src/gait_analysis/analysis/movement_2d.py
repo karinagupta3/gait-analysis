@@ -23,11 +23,15 @@ from .sagittal2d import valid_frame_mask
 
 _IDX = {name: i for i, name in enumerate(BLAZEPOSE_33)}
 
-# Reference values (general clinical literature; refine with cited sources later).
-# 5x sit-to-stand age norms (mean seconds) — Bohannon, Percept Mot Skills 2006.
+# Cited reference values (see docs/13-clinical-movement-research.md).
+# 5x sit-to-stand age norms, community mean seconds — Bohannon, Percept Mot Skills 2006.
 STS_5X_NORMS = {"(<60)": 10.0, "60-69": 11.4, "70-79": 12.6, "80-89": 14.8}
-STS_5X_FALLRISK_S = 15.0       # >~15 s widely cited as elevated fall risk
-SQUAT_PARALLEL_KNEE = (100, 130)   # deg knee flexion at a parallel/deep squat bottom
+STS_5X_SCREEN_S = 12.0         # >=12 s = screen-positive for fall risk (Tiedemann 2008)
+STS_5X_FALLRISK_S = 15.0       # >15 s = recurrent fallers (Buatois 2010)
+# Squat depth bands by peak knee flexion (deg) — Straub & Powers, IJSPT 2024.
+SQUAT_DEPTH_BANDS = [(110, "deep / past parallel"), (90, "parallel"),
+                     (60, "partial (above parallel)"), (0, "shallow")]
+SQUAT_PARALLEL_KNEE = (90, 110)    # parallel-squat knee-flexion band
 
 
 def _trunk_series(px, vis, valid):
@@ -121,9 +125,7 @@ def compute_movement_metrics(image_landmarks, visibility, width, height, fps, ta
     elif task == "squat":
         km = out["knee_peak_mean"]
         if km is not None:
-            out["depth_class"] = ("deep / past parallel" if km >= SQUAT_PARALLEL_KNEE[0]
-                                  else "partial (above parallel)" if km >= 70
-                                  else "shallow")
+            out["depth_class"] = next(name for lo, name in SQUAT_DEPTH_BANDS if km >= lo)
     return out
 
 

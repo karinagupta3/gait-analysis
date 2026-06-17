@@ -11,7 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .movement_2d import STS_5X_FALLRISK_S, STS_5X_NORMS, SQUAT_PARALLEL_KNEE
+from .movement_2d import (
+    STS_5X_FALLRISK_S, STS_5X_NORMS, STS_5X_SCREEN_S, SQUAT_PARALLEL_KNEE)
 
 TASK_LABEL = {"squat": "Squat", "sit_to_stand": "Sit-to-stand"}
 DISCLAIMER = (
@@ -71,9 +72,10 @@ def build_movement_report(metrics: dict, out_html, subject: str = "") -> Path:
         est = " (estimated from fewer reps)" if metrics.get("sts_5x_time_s_est") else ""
         note = ""
         if five is not None:
-            note = ("&#9888; above typical / fall-risk range" if five >= STS_5X_FALLRISK_S
+            note = ("&#9888; recurrent-faller range (>15 s)" if five > STS_5X_FALLRISK_S
+                    else "&#9888; screen-positive for fall risk (≥12 s)" if five >= STS_5X_SCREEN_S
                     else "within typical range")
-        norm_txt = "≈10–13 s (age 60–79); ≥15 s = elevated fall risk"
+        norm_txt = "60–69y ≈11.4 s, 70–79y ≈12.6 s; ≥12 s screen-positive (Tiedemann 2008)"
         rows += _row("5× sit-to-stand time", f"{five} s{est}" if five else None, norm_txt, note)
         rows += _row("Rises detected", n)
         rows += _row("Time per rise", f"{metrics.get('time_per_rep_s')} s" if metrics.get("time_per_rep_s") else None,
