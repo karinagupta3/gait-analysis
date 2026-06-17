@@ -18,9 +18,10 @@ import numpy as np  # noqa: E402
 from gait_analysis.pose import mediapipe3d  # noqa: E402
 from gait_analysis.analysis.sagittal2d import smooth_along_time, valid_frame_mask  # noqa: E402
 
-_BLAZE33 = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24),
-            (23, 24), (23, 25), (25, 27), (27, 29), (29, 31), (27, 31), (24, 26),
-            (26, 28), (28, 30), (30, 32), (28, 32), (0, 11), (0, 12)]
+_BLAZE33 = [(11, 12), (11, 23), (12, 24), (23, 24),
+            (23, 25), (25, 27), (27, 29), (29, 31), (27, 31),
+            (24, 26), (26, 28), (28, 30), (30, 32), (28, 32),
+            (0, 11), (0, 12)]   # gait skeleton: head+trunk+legs, no arms
 MIN_SCORE = 0.5
 
 

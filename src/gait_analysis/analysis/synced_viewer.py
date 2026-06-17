@@ -30,6 +30,13 @@ _COCO17 = [(5, 6), (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12), (11, 12),
 _BLAZE33 = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24),
             (23, 24), (23, 25), (25, 27), (27, 29), (29, 31), (27, 31), (24, 26),
             (26, 28), (28, 30), (30, 32), (28, 32), (0, 11), (0, 12)]
+# Gait skeleton: head + trunk + both legs, NO arms. The arms aren't used for sagittal
+# gait, and the far (occluded) arm's wrist is the main source of markers that "float"
+# off the body in a monocular side view — so we don't draw them at all.
+_GAIT_LINKS = [(11, 12), (11, 23), (12, 24), (23, 24),
+               (23, 25), (25, 27), (27, 29), (29, 31), (27, 31),   # left leg + foot
+               (24, 26), (26, 28), (28, 30), (30, 32), (28, 32),   # right leg + foot
+               (0, 11), (0, 12)]                                   # head
 
 
 def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
@@ -56,7 +63,7 @@ def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
         kp = norm
         kp[..., 0] *= w
         kp[..., 1] *= h
-        links = _BLAZE33
+        links = _GAIT_LINKS
     else:
         raise ValueError("npz lacks 'keypoints' (rtmpose) or 'image_landmarks' (mediapipe)")
 
@@ -100,7 +107,7 @@ def _world_landmarks_to_scene3d(data, min_score: float = 0.5) -> dict:
     fps = float(data["fps"]) if "fps" in data else 30.0
     frame_valid = (valid_frame_mask(data["image_landmarks"].astype(float), vis)
                    if "image_landmarks" in data else None)
-    drawn = {i for lk in _BLAZE33 for i in lk}   # gait skeleton only (drop finger/face dots)
+    drawn = {i for lk in _GAIT_LINKS for i in lk}   # head+trunk+legs, no arms/fingers/face
     frames = []
     for f in range(wl.shape[0]):
         if frame_valid is not None and not frame_valid[f]:
@@ -116,7 +123,7 @@ def _world_landmarks_to_scene3d(data, min_score: float = 0.5) -> dict:
                        if j in drawn and np.isfinite([x, y, z]).all() and v >= min_score else None)
         frames.append(row)
     return {"fps": round(fps, 3), "names": [str(i) for i in range(33)],
-            "links": _BLAZE33, "frames": frames}
+            "links": _GAIT_LINKS, "frames": frames}
 
 
 def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
