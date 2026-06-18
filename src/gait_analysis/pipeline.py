@@ -123,6 +123,14 @@ def run_screening(video: str | Path, outdir: str | Path, subject: str = "",
         print("[3/3] Screening report ...")
         report_path = screening_report.build_screening_report(metrics, report_out, subject=subject)
 
+    # Per-frame signals for the interactive grapher.
+    try:
+        from .analysis import series_export
+        series_export.write_series(
+            series_export.from_screening_metrics(task, metrics), outdir / "series.json")
+    except Exception as exc:
+        print(f"[note] series.json skipped: {exc}")
+
     # Synced viewer: video with 2D pose overlay (left) + 3D world-landmark skeleton (right).
     viewer_path = None
     try:

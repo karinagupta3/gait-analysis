@@ -455,6 +455,52 @@ else{setTimeout(poll,1500);}}
 window.onload=poll;</script>"""
 
 
+_GRAPH_BODY = """<section class="hero"><h1>Graph over time</h1>
+<p class="lead">Tick the signals you want and plot them over the trial timeline. Hover for values.</p></section>
+<div class="card">
+  <div id="meta" class="note" style="margin-bottom:8px"></div>
+  <div id="sigs" style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:14px"></div>
+  <div style="position:relative;height:55vh"><canvas id="chart"></canvas></div>
+  <p class="note" id="st" style="margin-top:10px">Loading&hellip;</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+var SID=__SID__, payload=null, chart=null;
+var COLORS=['#2563eb','#16a34a','#b45309','#b91c1c','#7c3aed','#0891b2','#db2777','#65a30d','#0f766e','#9333ea'];
+function $(id){return document.getElementById(id);}
+function xaxis(){
+  if(payload.t&&payload.t.length) return payload.t;
+  var n=payload.n||0, fps=payload.fps||30, a=[]; for(var i=0;i<n;i++)a.push(+(i/fps).toFixed(3)); return a;}
+function render(){
+  if(!payload) return; var xs=xaxis(), ds=[], ci=0, unit='';
+  Object.keys(payload.signals).forEach(function(k){
+    if(!$('c_'+k)||!$('c_'+k).checked) return; var s=payload.signals[k]; unit=s.unit||unit;
+    var pts=s.data.map(function(v,i){return {x:xs[i], y:v};});
+    ds.push({label:s.label+(s.unit?' ('+s.unit+')':''), data:pts, borderColor:COLORS[ci%COLORS.length],
+             backgroundColor:COLORS[ci%COLORS.length], borderWidth:1.6, pointRadius:0, spanGaps:false, tension:0.15}); ci++;});
+  if(chart) chart.destroy();
+  chart=new Chart($('chart'),{type:'line', data:{datasets:ds}, options:{
+    animation:false, parsing:false, normalized:true, maintainAspectRatio:false,
+    scales:{x:{type:'linear', title:{display:true,text:'time (s)'}},
+            y:{title:{display:true,text:unit||'value'}}},
+    plugins:{legend:{position:'top'}, tooltip:{mode:'index',intersect:false}},
+    interaction:{mode:'nearest',axis:'x',intersect:false}}});
+  $('st').textContent=ds.length?'':'Tick at least one signal above.';}
+fetch('/session/'+SID+'/series.json').then(function(r){return r.json();}).then(function(p){
+  payload=p; var names=Object.keys(p.signals);
+  $('meta').textContent=names.length+' signals · '+(p.task||'')+' · '+(p.n||0)+' frames @ '+(p.fps||'?')+' fps';
+  var box=$('sigs');
+  names.forEach(function(k,i){var lab=document.createElement('label');
+    lab.style='font-size:13px;font-weight:500;cursor:pointer';
+    var on=i<3?'checked':'';
+    lab.innerHTML='<input type="checkbox" id="c_'+k+'" '+on+'> '+p.signals[k].label;
+    lab.querySelector('input').addEventListener('change',render); box.appendChild(lab);});
+  if(!names.length){$('st').textContent='No signals available for this trial.'; return;}
+  render();
+}).catch(function(e){$('st').textContent='Could not load signals: '+e.message;});
+</script>"""
+
+
 def _capabilities() -> dict:
     """What's installed/configured for video processing (so the UI can tell the user)."""
     import importlib.util
@@ -566,6 +612,14 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
             _t.sleep(3)
         if not (sdir / "report.html").exists():
             raise RuntimeError("worker finished but returned no report")
+        # Turn the OpenSim .mot into graphable signals (all 3D joint angles over time).
+        mot = sdir / "coordinates.mot"
+        if mot.exists():
+            try:
+                from ..analysis import series_export
+                series_export.write_series(series_export.from_mot(mot), sdir / "series.json")
+            except Exception as exc:
+                job.log.append(f"series.json skipped: {exc}")
         (sdir / "meta.json").write_text(json.dumps({**meta, "created": _dt.datetime.now().isoformat()}))
         return sdir.name
 
@@ -651,6 +705,11 @@ def create_app(process_fn=None):
         title = f"{subject or 'Subject'} : {trial or 'trial'}"
         report.build_html_report(mot_path, html_path, gait_speed_m_s=spd,
                                  subject=subject or None, title=title, trc_path=trc_path)
+        try:
+            from ..analysis import series_export
+            series_export.write_series(series_export.from_mot(mot_path), sdir / "series.json")
+        except Exception:
+            pass
         meta = {"id": sid, "subject": subject, "trial": trial, "speed": spd,
                 "created": _dt.datetime.now().isoformat()}
         (sdir / "meta.json").write_text(json.dumps(meta))
@@ -662,20 +721,36 @@ def create_app(process_fn=None):
         if not html_path.exists():
             return HTMLResponse("<p>Not found. <a href='/'>Back</a></p>", status_code=404)
         report_html = html_path.read_text()
-        # If synced viewer was built, inject a prominent link at the top of the report.
-        viewer_path = _store_dir() / sid / "synced" / "viewer.html"
-        if viewer_path.exists():
-            banner = (
-                f'<div style="background:#f0f9ff;border:1px solid #bae6fd;padding:11px 16px;'
-                f'border-radius:8px;margin:0 0 14px;font-family:system-ui,Arial,sans-serif;font-size:14px">'
+        links = []
+        if (_store_dir() / sid / "synced" / "viewer.html").exists():
+            links.append(
                 f'<a href="/session/{sid}/synced/viewer.html" target="_blank" '
                 f'style="font-weight:600;color:#0369a1;text-decoration:none">'
-                f'&#9654; View synced video + 3D skeleton animation</a>'
-                f'<span style="color:#64748b"> &mdash; pose overlay on video with real-time 3D body model</span>'
-                f'</div>'
-            )
+                f'&#9654; Synced video + 3D skeleton</a>')
+        if (_store_dir() / sid / "series.json").exists():
+            links.append(
+                f'<a href="/session/{sid}/graph" target="_blank" '
+                f'style="font-weight:600;color:#0369a1;text-decoration:none">'
+                f'&#128202; Graph signals over time</a>')
+        if links:
+            banner = ('<div style="background:#f0f9ff;border:1px solid #bae6fd;padding:11px 16px;'
+                      'border-radius:8px;margin:0 0 14px;font-family:system-ui,Arial,sans-serif;'
+                      'font-size:14px;display:flex;gap:18px;flex-wrap:wrap">' + "".join(links) + '</div>')
             report_html = report_html.replace("<body>", "<body>" + banner, 1)
         return report_html
+
+    @app.get("/session/{sid}/graph", response_class=HTMLResponse)
+    def session_graph(sid: str):
+        if not (_store_dir() / sid / "series.json").exists():
+            return HTMLResponse("<p>No signals for this trial. <a href='/'>Back</a></p>", status_code=404)
+        return _shell("Graph", _GRAPH_BODY.replace("__SID__", json.dumps(sid)), "")
+
+    @app.get("/session/{sid}/series.json")
+    def session_series(sid: str):
+        fpath = _store_dir() / sid / "series.json"
+        if not fpath.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(fpath, media_type="application/json")
 
     @app.get("/session/{sid}/synced/{filename:path}")
     def session_synced_file(sid: str, filename: str):
