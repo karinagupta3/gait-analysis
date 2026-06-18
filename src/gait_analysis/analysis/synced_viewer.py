@@ -86,12 +86,74 @@ def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
     return {"fps": round(fps, 3), "w": w, "h": h, "links": links, "frames": frames}
 
 
-def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str) -> str:
+def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5):
+    """Burn the gait skeleton INTO the video pixels (same coordinate space as the
+    landmarks), so on-screen alignment is GUARANTEED regardless of how the browser
+    handles rotation/letterbox/scaling. Returns out_path on success, else None
+    (e.g. if the OpenCV build can't write video, so the caller falls back to the
+    browser canvas overlay)."""
+    import cv2
+    from .sagittal2d import smooth_along_time, valid_frame_mask
+    d = np.load(npz_path)
+    if "image_landmarks" not in d:
+        return None
+    norm = smooth_along_time(d["image_landmarks"].astype(float))
+    vis = d["visibility"].astype(float) if "visibility" in d else np.ones(norm.shape[:2])
+    valid = valid_frame_mask(d["image_landmarks"].astype(float), vis)
+    drawn = {i for lk in _GAIT_LINKS for i in lk}
+    fps = float(d["fps"]) if "fps" in d else 30.0
+
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1.0)   # decode upright (match extraction)
+    except Exception:
+        pass
+    writer, idx, drew = None, 0, 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            h, w = frame.shape[:2]
+            if writer is None:
+                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"),
+                                         fps or 30.0, (w, h))
+                if not writer.isOpened():
+                    return None
+            if idx < len(norm) and (idx >= len(valid) or valid[idx]):
+                pts = []
+                for j in range(norm.shape[1]):
+                    x, y = norm[idx, j]
+                    pts.append(None if (j not in drawn or not np.isfinite([x, y]).all()
+                                        or vis[idx, j] < min_score)
+                               else (int(round(x * w)), int(round(y * h))))
+                for a, b in _GAIT_LINKS:
+                    if pts[a] and pts[b]:
+                        cv2.line(frame, pts[a], pts[b], (255, 200, 120), 2, cv2.LINE_AA)
+                for p in pts:
+                    if p:
+                        cv2.circle(frame, p, 5, (90, 220, 90), -1, cv2.LINE_AA)
+                drew += 1
+            writer.write(frame)
+            idx += 1
+    finally:
+        cap.release()
+        if writer is not None:
+            writer.release()
+    out_path = Path(out_path)
+    if idx > 0 and drew > 0 and out_path.exists() and out_path.stat().st_size > 0:
+        return out_path
+    return None
+
+
+def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str,
+                burned: bool = False) -> str:
     """mode: 'model' (OpenSim meshes), 'markers' (.trc skeleton), or 'none'."""
     return (_TMPL
             .replace("__VIDEO__", json.dumps(video_name))
             .replace("__KP__", json.dumps(kpts2d))
             .replace("__MODE__", json.dumps(mode))
+            .replace("__BURNED__", json.dumps(bool(burned)))
             .replace("__SCENE__", json.dumps(scene3d)))
 
 
@@ -134,7 +196,18 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     video_path = Path(video_path)
-    shutil.copy(video_path, out_dir / video_path.name)
+
+    # Prefer a BURNED-IN overlay (skeleton drawn into the pixels): alignment is then
+    # guaranteed because it lives in the same coordinate space as the landmarks. Fall
+    # back to the browser canvas overlay only if video re-encoding is unavailable.
+    burned, left_video = False, video_path.name
+    try:
+        if render_overlay_video(video_path, npz_path, out_dir / "overlay.mp4") is not None:
+            burned, left_video = True, "overlay.mp4"
+    except Exception as exc:
+        print(f"[note] burned overlay failed ({exc}); using browser overlay")
+    if not burned:
+        shutil.copy(video_path, out_dir / video_path.name)
     kpts2d = kpts2d_from_npz(npz_path)
 
     scene3d, mode = None, "none"
@@ -157,9 +230,9 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
         except Exception as exc:
             print(f"[note] world-landmarks 3D fallback failed: {exc}")
 
-    (out_dir / "viewer.html").write_text(synced_html(video_path.name, kpts2d, scene3d, mode))
-    print(f"Wrote {out_dir}/viewer.html (right pane: {mode}). "
-          f"Serve the folder (python -m http.server) and open viewer.html.")
+    (out_dir / "viewer.html").write_text(synced_html(left_video, kpts2d, scene3d, mode, burned))
+    print(f"Wrote {out_dir}/viewer.html (left: {'burned-in overlay' if burned else 'canvas overlay'}, "
+          f"right pane: {mode}).")
     return out_dir / "viewer.html"
 
 
@@ -178,7 +251,7 @@ _TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Video + OpenS
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
-const KP=__KP__, S=__SCENE__, MODE=__MODE__, vid=document.getElementById('vid');
+const KP=__KP__, S=__SCENE__, MODE=__MODE__, BURNED=__BURNED__, vid=document.getElementById('vid');
 document.getElementById('rkind').textContent = MODE==='model'?'(musculoskeletal model)':MODE==='markers'?'(marker skeleton)':'(no 3D)';
 // ---- left: 2D overlay on canvas, mapped to the ACTUAL displayed video rect ----
 // The browser may letterbox the video inside the <video> box (object-fit) and uses
@@ -197,7 +270,8 @@ function rect(){
   const dw=vw*s, dh=vh*s;
   return {ox:(cw-dw)/2, oy:(ch-dh)/2, sx:dw/KP.w, sy:dh/KP.h};
 }
-function draw2d(){const r=rect(); cx.clearRect(0,0,ov.width,ov.height);
+function draw2d(){ if(BURNED) return;   // skeleton is baked into the video pixels
+  const r=rect(); cx.clearRect(0,0,ov.width,ov.height);
   const fr=KP.frames[frameOf(KP.fps,KP.frames.length)]||[];
   cx.strokeStyle='#9ecbff'; cx.lineWidth=2;
   for(const [i,j] of KP.links){const a=fr[i],b=fr[j]; if(!a||!b)continue;
