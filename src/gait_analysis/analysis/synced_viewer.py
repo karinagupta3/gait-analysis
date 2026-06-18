@@ -89,11 +89,23 @@ def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
 def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5):
     """Burn the gait skeleton INTO the video pixels (same coordinate space as the
     landmarks), so on-screen alignment is GUARANTEED regardless of how the browser
-    handles rotation/letterbox/scaling. Returns out_path on success, else None
-    (e.g. if the OpenCV build can't write video, so the caller falls back to the
-    browser canvas overlay)."""
+    handles rotation/letterbox/scaling.
+
+    Encoding: OpenCV reliably writes mp4v (MPEG-4 Part 2) on every build, but browsers
+    can't PLAY mp4v, and the H.264 (avc1) encoder is missing from the Linux OpenCV
+    wheel. So we write a temp mp4v with OpenCV, then transcode to browser-playable
+    H.264 with the ffmpeg CLI (libx264). Returns out_path, or None (→ caller falls
+    back to the browser canvas overlay) if ffmpeg or video writing is unavailable.
+    """
+    import os
+    import shutil as _sh
+    import subprocess
+
     import cv2
     from .sagittal2d import smooth_along_time, valid_frame_mask
+
+    if _sh.which("ffmpeg") is None:        # need ffmpeg to make a playable H.264 file
+        return None
     d = np.load(npz_path)
     if "image_landmarks" not in d:
         return None
@@ -103,6 +115,8 @@ def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5)
     drawn = {i for lk in _GAIT_LINKS for i in lk}
     fps = float(d["fps"]) if "fps" in d else 30.0
 
+    out_path = Path(out_path)
+    tmp = out_path.with_suffix(".raw.mp4")        # OpenCV-written mp4v, then transcoded
     cap = cv2.VideoCapture(str(video_path))
     try:
         cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1.0)   # decode upright (match extraction)
@@ -116,12 +130,7 @@ def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5)
                 break
             h, w = frame.shape[:2]
             if writer is None:
-                # avc1 = H.264 — the codec browsers can actually play. (mp4v / MPEG-4
-                # Part 2, OpenCV's usual default, decodes in ffmpeg but NOT in Chrome,
-                # which made the burned-in video appear broken.) If H.264 isn't
-                # available in this OpenCV build, bail so build() falls back to the
-                # browser canvas overlay on the original (already playable) video.
-                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"avc1"),
+                writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"),
                                          fps or 30.0, (w, h))
                 if not writer.isOpened():
                     writer.release()
@@ -146,10 +155,21 @@ def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5)
         cap.release()
         if writer is not None:
             writer.release()
-    out_path = Path(out_path)
-    if idx > 0 and drew > 0 and out_path.exists() and out_path.stat().st_size > 0:
-        return out_path
-    return None
+    if idx == 0 or drew == 0 or not tmp.exists():
+        return None
+    try:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tmp),
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                        str(out_path)], check=True)
+    except Exception as exc:
+        print(f"[note] ffmpeg transcode failed: {exc}")
+        return None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return out_path if out_path.exists() and out_path.stat().st_size > 0 else None
 
 
 def synced_html(video_name: str, kpts2d: dict, scene3d: dict | None, mode: str,
