@@ -36,7 +36,11 @@ _BLAZE33 = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24)
 _GAIT_LINKS = [(11, 12), (11, 23), (12, 24), (23, 24),
                (23, 25), (25, 27), (27, 29), (29, 31), (27, 31),   # left leg + foot
                (24, 26), (26, 28), (28, 30), (30, 32), (28, 32),   # right leg + foot
+               (11, 13), (13, 15), (12, 14), (14, 16),             # arms (arm swing)
                (0, 11), (0, 12)]                                   # head
+# Arms are included now that the overlay is BURNED INTO the pixels (perfectly aligned)
+# and each point is confidence-gated — so the occluded far arm is dropped rather than
+# drawn in the wrong place. Arm swing (reduced/asymmetric) is a useful gait flag.
 
 
 def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:

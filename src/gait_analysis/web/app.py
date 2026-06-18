@@ -721,22 +721,27 @@ def create_app(process_fn=None):
         if not html_path.exists():
             return HTMLResponse("<p>Not found. <a href='/'>Back</a></p>", status_code=404)
         report_html = html_path.read_text()
-        links = []
+        inject = ""
+        # Embed the video + 3D/OpenSim viewer INLINE (no separate tab) at the top.
         if (_store_dir() / sid / "synced" / "viewer.html").exists():
-            links.append(
-                f'<a href="/session/{sid}/synced/viewer.html" target="_blank" '
-                f'style="font-weight:600;color:#0369a1;text-decoration:none">'
-                f'&#9654; Synced video + 3D skeleton</a>')
+            inject += (
+                f'<div style="margin:0 0 16px;font-family:system-ui,Arial,sans-serif">'
+                f'<div style="font-size:13px;font-weight:600;color:#475569;margin:0 0 6px">'
+                f'Video + 3D view</div>'
+                f'<iframe src="/session/{sid}/synced/viewer.html" '
+                f'style="width:100%;height:72vh;min-height:480px;border:1px solid #e2e8f0;'
+                f'border-radius:10px" loading="lazy" title="Video and 3D skeleton"></iframe>'
+                f'<div style="font-size:12px;color:#64748b;margin-top:4px">'
+                f'Drag the 3D view to rotate. <a href="/session/{sid}/synced/viewer.html" '
+                f'target="_blank">Open full screen</a></div></div>')
         if (_store_dir() / sid / "series.json").exists():
-            links.append(
+            inject += (
+                f'<div style="margin:0 0 16px;font-family:system-ui,Arial,sans-serif;font-size:14px">'
                 f'<a href="/session/{sid}/graph" target="_blank" '
                 f'style="font-weight:600;color:#0369a1;text-decoration:none">'
-                f'&#128202; Graph signals over time</a>')
-        if links:
-            banner = ('<div style="background:#f0f9ff;border:1px solid #bae6fd;padding:11px 16px;'
-                      'border-radius:8px;margin:0 0 14px;font-family:system-ui,Arial,sans-serif;'
-                      'font-size:14px;display:flex;gap:18px;flex-wrap:wrap">' + "".join(links) + '</div>')
-            report_html = report_html.replace("<body>", "<body>" + banner, 1)
+                f'&#128202; Graph signals over time</a></div>')
+        if inject:
+            report_html = report_html.replace("<body>", "<body>" + inject, 1)
         return report_html
 
     @app.get("/session/{sid}/graph", response_class=HTMLResponse)
