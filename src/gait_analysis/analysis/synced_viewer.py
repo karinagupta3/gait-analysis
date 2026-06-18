@@ -116,9 +116,15 @@ def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5)
                 break
             h, w = frame.shape[:2]
             if writer is None:
-                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"),
+                # avc1 = H.264 — the codec browsers can actually play. (mp4v / MPEG-4
+                # Part 2, OpenCV's usual default, decodes in ffmpeg but NOT in Chrome,
+                # which made the burned-in video appear broken.) If H.264 isn't
+                # available in this OpenCV build, bail so build() falls back to the
+                # browser canvas overlay on the original (already playable) video.
+                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"avc1"),
                                          fps or 30.0, (w, h))
                 if not writer.isOpened():
+                    writer.release()
                     return None
             if idx < len(norm) and (idx >= len(valid) or valid[idx]):
                 pts = []
