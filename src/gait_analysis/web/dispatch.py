@@ -253,3 +253,24 @@ def fetch_outputs(session_id: str, dest_dir: str | Path) -> list[str]:
         fetched.append(name)
 
     return fetched
+
+
+def fetch_synced(session_id: str, dest_dir: str | Path) -> int:
+    """Download the worker's synced-viewer folder (gait-out/<sid>/synced/**) into
+    dest_dir, preserving sub-paths (viewer.html, overlay.mp4, geometry/*.vtp). This
+    is how the cloud OpenSim BONE rendering reaches tier-1 to be served. Returns the
+    number of files downloaded (0 if the worker produced no scene)."""
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    cc = _blob_service().get_container_client(OUT_CONTAINER)
+    prefix = f"{session_id}/synced/"
+    n = 0
+    for b in cc.list_blobs(name_starts_with=prefix):
+        rel = b.name[len(prefix):]
+        if not rel:
+            continue
+        out = dest / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(cc.get_blob_client(b.name).download_blob().readall())
+        n += 1
+    return n

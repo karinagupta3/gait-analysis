@@ -204,7 +204,34 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
             "Pipeline finished but no coordinates.mot was produced — the .mot is "
             "the contract with tier-1, so this job is treated as failed.")
 
+    # Upload the synced viewer folder (video overlay + OpenSim BONE scene + geometry)
+    # so tier-1 can serve the 3D rendering inline. Best-effort: failure here doesn't
+    # fail the job (the .mot/report are the contract).
+    synced = outdir / "synced"
+    if synced.is_dir():
+        try:
+            cnt = _upload_dir(blob_service, OUT_CONTAINER, synced, f"{session_id}/synced")
+            print(f"[tier-2] uploaded synced viewer ({cnt} files)")
+        except Exception as exc:
+            print(f"[tier-2] synced upload skipped: {exc}")
+
     return {"state": "done", "mode": mode, "outputs": uploaded}
+
+
+def _upload_dir(blob_service, container: str, local_dir, prefix: str) -> int:
+    """Upload every file under local_dir to <prefix>/<relpath>. Returns file count."""
+    from pathlib import Path as _P
+    local_dir = _P(local_dir)
+    ctypes = {".html": "text/html", ".mp4": "video/mp4", ".json": "application/json",
+              ".vtp": "application/octet-stream", ".trc": "text/plain"}
+    n = 0
+    for p in sorted(local_dir.rglob("*")):
+        if p.is_file():
+            rel = p.relative_to(local_dir).as_posix()
+            _upload_blob(blob_service, container, f"{prefix}/{rel}", p,
+                         content_type=ctypes.get(p.suffix.lower()))
+            n += 1
+    return n
 
 
 def main() -> int:

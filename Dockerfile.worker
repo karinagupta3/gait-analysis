@@ -15,7 +15,7 @@ WORKDIR /app
 
 # System libs MediaPipe needs at runtime (OpenGL/EGL) + curl, same as tier-1.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgl1 libglib2.0-0 libgles2 libegl1 curl \
+        libgl1 libglib2.0-0 libgles2 libegl1 curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # --- conda layer: python + OpenSim into the base env -------------------------

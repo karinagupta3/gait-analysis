@@ -23,6 +23,12 @@ from ..analysis import kinematics
 
 _TRANSLATIONAL_SUFFIXES = ("_tx", "_ty", "_tz")
 
+# Skip the tiny hand/finger bone meshes — irrelevant to gait and ~50 extra meshes
+# that bog down the browser. Keep pelvis/legs/feet/trunk/skull/arms.
+_SKIP_MESH = ("capitate", "hamate", "lunate", "metacarpal", "pisiform", "scaphoid",
+              "trapezium", "trapezoid", "triquetrum", "index_", "middle_", "ring_",
+              "little_", "thumb_", "_distal", "_medial", "_proximal")
+
 
 def _viewer_html(scene: dict) -> str:
     """Self-contained viewer: motion inlined, meshes fetched from ./geometry via VTKLoader."""
@@ -48,6 +54,13 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
     search_dirs = [osim_dir, osim_dir / "Geometry", osim_dir.parent / "Geometry"]
     if geometry:
         search_dirs.insert(0, Path(geometry).expanduser())
+    # Pose2Sim ships the LaiUhlrich2022 bone meshes (OpenSim_Setup/Geometry); use them
+    # so the cloud worker (which has Pose2Sim) can render bones with no extra assets.
+    try:
+        import Pose2Sim
+        search_dirs.append(Path(Pose2Sim.__file__).resolve().parent / "OpenSim_Setup" / "Geometry")
+    except Exception:
+        pass
     for d in search_dirs:                       # let OpenSim resolve meshes from these dirs too
         try:
             osim.ModelVisualizer.addDirToGeometrySearchPaths(str(d))
@@ -66,6 +79,8 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
         if mesh is None:
             continue
         fname = mesh.getGeometryFilename()
+        if any(t in fname.lower() for t in _SKIP_MESH):   # drop hand/finger detail
+            continue
         base = osim.PhysicalFrame.safeDownCast(mesh.getFrame().findBaseFrame())
         if base is None:
             continue

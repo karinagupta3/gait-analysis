@@ -622,6 +622,11 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
                 last = state
             if state == "done":
                 dispatch.fetch_outputs(sdir.name, sdir)
+                try:                                  # pull the OpenSim 3D bone viewer
+                    if dispatch.fetch_synced(sdir.name, sdir / "synced"):
+                        job.log.append("fetched 3D viewer (video + OpenSim bones)")
+                except Exception as exc:
+                    job.log.append(f"3D viewer fetch skipped: {exc}")
                 break
             if state == "error":
                 raise RuntimeError("worker: " + stt.get("error", "3D processing failed"))
