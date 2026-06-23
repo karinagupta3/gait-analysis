@@ -288,7 +288,9 @@ def _process_body() -> str:
         '<input name="weight_kg" type="number" step="0.1" placeholder="e.g. 70"></div></div></div>'
         '<label>Trial label (optional)</label>'
         '<input name="trial" placeholder="auto-named from the movement">'
-        f'<label>Mode</label><select name="mode">{mode_opts}</select>'
+        f'<div id="modewrap"><label>Mode</label><select name="mode" id="mode">{mode_opts}</select>'
+        '<div class="note" style="margin-top:6px">3D builds the OpenSim skeleton (video shown in the '
+        'corner of the 3D view). 2D is a faster side-view screening report.</div></div>'
         '<label>Video</label><input name="video" type="file" accept="video/*" required>'
         '<button class="btn" type="submit">Upload &amp; process</button></form></div>'
         '<script>'
@@ -307,7 +309,13 @@ def _process_body() -> str:
         '};'
         'function updGuide(){var t=document.getElementById("task").value;'
         'document.getElementById("guide").innerHTML=GUIDE[t]||"";'
-        'document.getElementById("stsfields").style.display=(t=="sit_to_stand")?"block":"none";}'
+        'document.getElementById("stsfields").style.display=(t=="sit_to_stand")?"block":"none";'
+        # 3D OpenSim is walking-only (the 3D report is gait kinematics). For walking,
+        # DEFAULT to 3D so the OpenSim skeleton shows; for other movements force 2D.
+        'var mw=document.getElementById("modewrap"),m=document.getElementById("mode");'
+        'if(mw&&m){var has3d=!!m.querySelector(\'option[value="quick"]\');'
+        'if(t=="gait"){mw.style.display="block"; if(has3d)m.value="quick";}'
+        'else{mw.style.display="none"; m.value="screening";}}}'
         'updGuide();'
         '</script>')
 
@@ -393,7 +401,8 @@ function $(id){return document.getElementById(id);}
 function upd(){var t=$('task').value;
   $('guide').innerHTML=GUIDE[t]||'';
   $('stsfields').style.display=(t=='sit_to_stand')?'block':'none';
-  $('modewrap').style.display=(t=='gait')?'block':'none';}
+  $('modewrap').style.display=(t=='gait')?'block':'none';
+  var m=$('mode'); if(m&&t=='gait'&&m.querySelector('option[value="quick"]'))m.value='quick';}
 function constraints(){var land=$('orient').value=='landscape';
   var v={width:{ideal:land?1920:1080},height:{ideal:land?1080:1920}};
   var dev=$('cam').value; if(dev) v.deviceId={exact:dev};

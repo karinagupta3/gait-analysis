@@ -283,16 +283,35 @@ def build(video_path, npz_path, out_dir, trc_path=None, model=None, mot=None,
     return out_dir / "viewer.html"
 
 
-_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>Video + OpenSim (synced)</title>
+_TMPL = """<!doctype html><html><head><meta charset="utf-8"><title>OpenSim + video (synced)</title>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
-<style>body{margin:0;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
-.wrap{display:flex;flex-wrap:wrap;gap:8px;padding:8px}.pane{flex:1 1 420px;position:relative;min-width:360px}
-#vid{width:100%;display:block;border-radius:8px;background:#000}#ov{position:absolute;left:0;top:0;pointer-events:none}
-#viz{width:100%;height:62vh;background:#0e1116;border-radius:8px}h3{margin:6px 2px;font-weight:600}
-.tag{font-weight:400;color:#7c8aa0;font-size:12px}</style></head><body>
-<div class="wrap">
-  <div class="pane"><h3>Video + tracked markers</h3><video id="vid" src=__VIDEO__ controls playsinline></video><canvas id="ov"></canvas></div>
-  <div class="pane"><h3>OpenSim rendering <span class="tag" id="rkind"></span></h3><div id="viz"></div></div>
+<style>html,body{margin:0;height:100%;background:#0e1116;color:#cbd5e1;font:14px -apple-system,Segoe UI,Roboto,sans-serif}
+/* OpenSim render fills the stage; the video is a small draggable picture-in-picture. */
+#stage{position:relative;width:100%;height:100vh;background:radial-gradient(1200px 600px at 50% 18%,#161c27,#0e1116);overflow:hidden}
+#viz{position:absolute;inset:0}
+#title{position:absolute;left:14px;top:12px;font-weight:600;letter-spacing:.01em;color:#e2e8f0;
+  background:rgba(14,17,22,.55);padding:5px 11px;border-radius:8px;backdrop-filter:blur(4px);pointer-events:none}
+#title .tag{font-weight:400;color:#93a4bd;font-size:12px}
+#hint{position:absolute;right:14px;bottom:14px;font-size:12px;color:#7c8aa0;background:rgba(14,17,22,.55);
+  padding:5px 11px;border-radius:8px;backdrop-filter:blur(4px);pointer-events:none}
+#pip{position:absolute;left:16px;bottom:16px;width:30%;min-width:210px;max-width:380px;
+  border-radius:11px;overflow:hidden;background:#000;box-shadow:0 10px 30px rgba(0,0,0,.55);
+  border:1px solid #243043}
+#grip{height:22px;background:linear-gradient(#1b2433,#141b27);cursor:move;display:flex;align-items:center;
+  gap:6px;padding:0 9px;color:#7c8aa0;font-size:11px;white-space:nowrap;overflow:hidden;user-select:none}
+#grip b{color:#cbd5e1;font-weight:600}
+#grip .dots{letter-spacing:2px}
+#vidwrap{position:relative;line-height:0}
+#vid{width:100%;display:block;background:#000}
+#ov{position:absolute;left:0;top:0;pointer-events:none}</style></head><body>
+<div id="stage">
+  <div id="viz"></div>
+  <div id="title">OpenSim rendering <span class="tag" id="rkind"></span></div>
+  <div id="hint">drag to rotate · scroll to zoom</div>
+  <div id="pip">
+    <div id="grip"><span class="dots">⠿</span><b>Video</b><span>· drag to move</span></div>
+    <div id="vidwrap"><video id="vid" src=__VIDEO__ controls playsinline></video><canvas id="ov"></canvas></div>
+  </div>
 </div>
 <script type="module">
 import * as THREE from 'three';
@@ -300,18 +319,22 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {VTKLoader} from 'three/addons/loaders/VTKLoader.js';
 const KP=__KP__, S=__SCENE__, MODE=__MODE__, BURNED=__BURNED__, vid=document.getElementById('vid');
 document.getElementById('rkind').textContent = MODE==='model'?'(musculoskeletal model)':MODE==='markers'?'(marker skeleton)':'(no 3D)';
-// ---- left: 2D overlay on canvas, mapped to the ACTUAL displayed video rect ----
-// The browser may letterbox the video inside the <video> box (object-fit) and uses
-// the video's post-rotation intrinsic size. We map keypoints (in KP.w x KP.h space)
-// into the real content rectangle so the skeleton lands ON the person, not above/
-// beside them. We also warn if the extracted aspect ratio disagrees with what the
-// browser is showing (a sign the source had a rotation flag handled differently).
+// ---- picture-in-picture: drag the video around by its grip bar ----
+(function(){const pip=document.getElementById('pip'),grip=document.getElementById('grip'),stage=document.getElementById('stage');
+  let dx=0,dy=0,drag=false;
+  grip.addEventListener('pointerdown',e=>{drag=true;const r=pip.getBoundingClientRect();dx=e.clientX-r.left;dy=e.clientY-r.top;
+    pip.style.right='auto';pip.style.bottom='auto';grip.setPointerCapture(e.pointerId);});
+  grip.addEventListener('pointermove',e=>{if(!drag)return;const s=stage.getBoundingClientRect();
+    let x=e.clientX-s.left-dx,y=e.clientY-s.top-dy;
+    x=Math.max(0,Math.min(x,s.width-pip.offsetWidth));y=Math.max(0,Math.min(y,s.height-pip.offsetHeight));
+    pip.style.left=x+'px';pip.style.top=y+'px';});
+  grip.addEventListener('pointerup',()=>{drag=false;});})();
+// ---- video overlay canvas (only used when the skeleton ISN'T burned into pixels) ----
 const ov=document.getElementById('ov'), cx=ov.getContext('2d');
 function fit(){ov.width=vid.clientWidth; ov.height=vid.clientHeight;}
 vid.addEventListener('loadedmetadata',fit); addEventListener('resize',fit);
 function frameOf(fps,n){return Math.min(Math.max(0,Math.round(vid.currentTime*fps)), n-1);}
 function rect(){
-  // object-fit:contain — the video content centered inside the element box.
   const vw=vid.videoWidth||KP.w, vh=vid.videoHeight||KP.h;
   const cw=ov.width, ch=ov.height, s=Math.min(cw/vw, ch/vh);
   const dw=vw*s, dh=vh*s;
@@ -324,19 +347,22 @@ function draw2d(){ if(BURNED) return;   // skeleton is baked into the video pixe
   for(const [i,j] of KP.links){const a=fr[i],b=fr[j]; if(!a||!b)continue;
     cx.beginPath(); cx.moveTo(r.ox+a[0]*r.sx,r.oy+a[1]*r.sy); cx.lineTo(r.ox+b[0]*r.sx,r.oy+b[1]*r.sy); cx.stroke();}
   cx.fillStyle='#2dd4bf'; for(const p of fr){if(!p)continue; cx.beginPath(); cx.arc(r.ox+p[0]*r.sx,r.oy+p[1]*r.sy,3.5,0,7); cx.fill();}}
-// ---- right: three.js scene driven by the same video time ----
-let render3d=()=>{};
-if(S){const el=document.getElementById('viz'),W=el.clientWidth,H=el.clientHeight||500;
+// ---- main stage: three.js scene driven by the same video time ----
+let render3d=()=>{}, R=null, CAM=null;
+if(S){const el=document.getElementById('viz');
+  function size(){return [el.clientWidth||800, el.clientHeight||500];}
+  let [W,H]=size();
   const scene=new THREE.Scene();
-  const cam=new THREE.PerspectiveCamera(50,W/H,0.01,100); cam.position.set(2.4,1.1,2.4);
-  const r=new THREE.WebGLRenderer({antialias:true}); r.setSize(W,H); el.appendChild(r.domElement);
-  const ctrl=new OrbitControls(cam,r.domElement);
-  scene.add(new THREE.HemisphereLight(0xffffff,0x223,1.15));
-  const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(2,4,3); scene.add(dl);
+  const cam=new THREE.PerspectiveCamera(50,W/H,0.01,100); cam.position.set(2.6,1.15,2.6); CAM=cam;
+  const r=new THREE.WebGLRenderer({antialias:true}); r.setPixelRatio(devicePixelRatio||1); r.setSize(W,H);
+  el.appendChild(r.domElement); R=r;
+  const ctrl=new OrbitControls(cam,r.domElement); ctrl.target.set(0,0.9,0);
+  scene.add(new THREE.HemisphereLight(0xffffff,0x223,1.2));
+  const dl=new THREE.DirectionalLight(0xffffff,0.75); dl.position.set(2,4,3); scene.add(dl);
   scene.add(new THREE.GridHelper(4,16,0x334155,0x1f2937));
+  addEventListener('resize',()=>{const [w,h]=size();cam.aspect=w/h;cam.updateProjectionMatrix();r.setSize(w,h);});
   if(MODE==='model'){
-    ctrl.target.set(0,0.9,0);
-    const mat=new THREE.MeshLambertMaterial({color:0xe8e2d6}), groups={}, loader=new VTKLoader();
+    const mat=new THREE.MeshLambertMaterial({color:0xeae3d6}), groups={}, loader=new VTKLoader();
     for(const b of S.bodies){const g=new THREE.Group(); groups[b.name]=g; scene.add(g);
       for(const m of b.meshes){ if(!m.found) continue;
         loader.load(m.file, geom=>{geom.computeVertexNormals(); const mesh=new THREE.Mesh(geom,mat);
@@ -345,7 +371,7 @@ if(S){const el=document.getElementById('viz'),W=el.clientWidth,H=el.clientHeight
       for(const name in groups){const t=fr[name]; if(!t)continue;
         groups[name].position.set(t[0],t[1],t[2]); groups[name].quaternion.set(t[3],t[4],t[5],t[6]);}
       ctrl.update(); r.render(scene,cam);};
-  } else {                                            // marker skeleton from .trc
+  } else {                                            // marker skeleton from .trc / world landmarks
     const M=S.names.length, pGeo=new THREE.BufferGeometry(), pArr=new Float32Array(M*3);
     pGeo.setAttribute('position',new THREE.BufferAttribute(pArr,3));
     scene.add(new THREE.Points(pGeo,new THREE.PointsMaterial({color:0x2dd4bf,size:0.055})));
@@ -360,9 +386,6 @@ if(S){const el=document.getElementById('viz'),W=el.clientWidth,H=el.clientHeight
         lArr[k*6+3]=b?b[0]:NaN;lArr[k*6+4]=b?b[1]:NaN;lArr[k*6+5]=b?b[2]:NaN;}
       lGeo.attributes.position.needsUpdate=true; ctrl.update(); r.render(scene,cam);};
   }}
-// Re-fit the canvas to the video EVERY frame: the two-pane flex layout and the
-// three.js panel reflow after metadata loads, so a one-time fit() leaves the canvas
-// at a stale size and the skeleton lands offset (e.g. above the person).
 function loop(){requestAnimationFrame(loop); fit(); draw2d(); render3d();}
 fit(); loop();
 </script></body></html>"""
