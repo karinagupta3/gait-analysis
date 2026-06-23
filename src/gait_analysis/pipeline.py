@@ -45,40 +45,68 @@ def report_from_mot(mot_path: str | Path, gait_speed_m_s: float | None = None,
 
 
 def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
-              gait_speed_m_s: float | None = None) -> dict:
-    """Full single-phone quick-mode pipeline. Requires mediapipe + OpenSim + a model."""
-    video, model, outdir = Path(video), Path(model), Path(outdir)
+              gait_speed_m_s: float | None = None,
+              height_m: float | None = None, mass_kg: float | None = None) -> dict:
+    """Full single-phone quick-mode pipeline (OpenCap-style marker augmentation).
+
+    video -> MediaPipe BlazePose-33 world landmarks -> the Stanford marker-augmenter
+    LSTM (43 anatomical "_study" markers) -> OpenSim scale + IK on the LaiUhlrich2022
+    model. Driving IK from the augmented markers (not raw keypoints) is what keeps the
+    trunk upright instead of hunched. `model` is kept for signature compatibility but
+    is unused -- the bundled LaiUhlrich2022 model is used. Requires mediapipe + OpenSim.
+
+    height_m / mass_kg: subject anthropometry for scaling + augmentation. If height is
+    None it is estimated from the pose (less reliable -- prefer the UI-entered value).
+    """
+    video, outdir = Path(video), Path(outdir)
     if not video.exists():
         raise FileNotFoundError(video)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    import numpy as np
 
     # Stage 1: MediaPipe 3D (lazy import; needs `pip install mediapipe`).
     from .pose import mediapipe3d
     print("[1/5] MediaPipe 3D world landmarks ...")
     npz = outdir / "world_landmarks.npz"
-    import numpy as np
-    np.savez_compressed(npz, **mediapipe3d.extract_world_landmarks(video))
+    d = mediapipe3d.extract_world_landmarks(video)
+    np.savez_compressed(npz, **d)
 
-    # Stage 2: landmarks -> OpenSim .trc.
-    from .biomech import blazepose_to_trc
-    print("[2/5] BlazePose -> OpenSim markers (.trc) ...")
-    trc = blazepose_to_trc.npz_to_trc(npz, outdir / "markers.trc")
+    # Stage 2: landmarks -> OpenSim frame, then marker augmentation -> 43 anatomical
+    # markers written to a .trc the LaiUhlrich2022 model is built around.
+    from .biomech import blazepose_to_trc, marker_augmentation as MA
+    print("[2/5] Marker augmentation (Stanford LSTM -> anatomical markers) ...")
+    world = blazepose_to_trc.remap_axes(d["world_landmarks"].astype(float))
+    world[d["visibility"].astype(float) < 0.3] = np.nan
+    world = blazepose_to_trc._fill_gaps(world)
+    fps = float(d["fps"]) or 30.0
+    height_m = float(height_m) if height_m else MA.estimate_height_m(world)
+    mass_kg = float(mass_kg) if mass_kg else 70.0
+    print(f"      subject: height={height_m:.2f} m, mass={mass_kg:.0f} kg")
+    names, pos = MA.augment(world, height_m, mass_kg)
+    times = np.arange(world.shape[0]) / fps
+    trc = blazepose_to_trc.write_trc(
+        outdir / "markers.trc", names, pos.astype(np.float32), times)
 
-    # Stage 3: OpenSim scale + IK (needs OpenSim + a marked model).
-    from .biomech import opensim_ik
-    print("[3/5] OpenSim inverse kinematics ...")
-    mot = opensim_ik.run_ik_from_trc(model, trc, outdir / "coordinates.mot")
+    # Stage 3: OpenSim scale + IK on the augmented markers (bundled OpenCap setups).
+    from .biomech import augmented_ik
+    print("[3/5] OpenSim scaling + inverse kinematics ...")
+    mot, scaled_model = augmented_ik.scale_and_ik(trc, outdir, height_m, mass_kg)
+    import shutil
+    shutil.copyfile(mot, outdir / "coordinates.mot")   # tier-2 contract name
+    mot = outdir / "coordinates.mot"
 
     # Stages 4-5: report + signatures.
     print("[4/5] Kinematics report ...")
     print("[5/5] Clinical signature flags ...")
     result = report_from_mot(mot, gait_speed_m_s, plot_path=outdir / "joint_angles.png")
     result["mot"] = mot
+    result["scaled_model"] = str(scaled_model)
 
-    # Side-by-side viewer: video+markers (left) synced with the OpenSim model render (right).
+    # Side-by-side viewer: video+markers (left) synced with the SCALED OpenSim model.
     try:
         from .analysis import synced_viewer
-        synced_viewer.build(video, npz, outdir / "synced", model=model, mot=mot)
+        synced_viewer.build(video, npz, outdir / "synced", model=scaled_model, mot=mot)
         result["synced_viewer"] = str(outdir / "synced" / "viewer.html")
     except Exception as exc:
         print(f"[note] synced viewer skipped: {exc}")

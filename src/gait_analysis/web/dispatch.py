@@ -127,6 +127,8 @@ def dispatch_job(
     mode: str,
     ext: str,
     speed: float | None = None,
+    height_m: float | None = None,
+    mass_kg: float | None = None,
 ) -> dict:
     """Upload the video and enqueue a 3D job for the tier-2 worker.
 
@@ -178,6 +180,8 @@ def dispatch_job(
         "mode": mode,
         "ext": ext,
         "speed": speed,
+        "height_m": height_m,
+        "mass_kg": mass_kg,
     }
     queue = _queue_client()
     _ensure_queue(queue)

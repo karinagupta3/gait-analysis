@@ -171,8 +171,10 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
         sid_dir / f"video.{ext}")
 
     if mode == "quick":
-        # 1-phone 3D: MediaPipe -> .trc -> OpenSim IK -> coordinates.mot.
-        pipeline.run_quick(video, _osim_model(), outdir, gait_speed_m_s=speed)
+        # 1-phone 3D: MediaPipe -> marker augmentation -> OpenSim IK -> coordinates.mot.
+        pipeline.run_quick(
+            video, _osim_model(), outdir, gait_speed_m_s=speed,
+            height_m=msg.get("height_m"), mass_kg=msg.get("mass_kg"))
         report_src = outdir / "report.html"
     elif mode == "accurate":
         # 2-phone: Pose2Sim expects a project directory; the downloaded video is

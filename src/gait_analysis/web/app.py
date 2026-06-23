@@ -611,7 +611,15 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
         import time as _t
         ext = video_path.suffix.lstrip(".") or "mp4"
         job.log.append("dispatching 3D job to the OpenSim worker (tier-2) ...")
-        dispatch.dispatch_job(sdir.name, video_path, "quick", ext, speed=meta.get("speed"))
+        # Pass subject anthropometry (from the form) so the worker scales the model
+        # and runs marker augmentation correctly; None -> worker estimates from pose.
+        def _f(x):
+            try: return float(x)
+            except (TypeError, ValueError): return None
+        h_cm, w_kg = _f(meta.get("height_cm")), _f(meta.get("weight_kg"))
+        dispatch.dispatch_job(
+            sdir.name, video_path, "quick", ext, speed=meta.get("speed"),
+            height_m=(h_cm / 100.0 if h_cm else None), mass_kg=w_kg)
         deadline = _t.time() + 1800           # 30 min cap
         last = None
         while True:
@@ -653,8 +661,13 @@ def _default_process(job, video_path: Path, sdir: Path, meta: dict) -> str:
                            "or local OpenSim + GAIT_OSIM_MODEL.")
 
     from ..pipeline import run_quick
-    job.log.append("running MediaPipe 3D -> .trc -> OpenSim IK ...")
-    result = run_quick(video_path, model, sdir, gait_speed_m_s=meta.get("speed"))
+    job.log.append("running MediaPipe 3D -> marker augmentation -> OpenSim IK ...")
+    def _f(x):
+        try: return float(x)
+        except (TypeError, ValueError): return None
+    h_cm, w_kg = _f(meta.get("height_cm")), _f(meta.get("weight_kg"))
+    result = run_quick(video_path, model, sdir, gait_speed_m_s=meta.get("speed"),
+                       height_m=(h_cm / 100.0 if h_cm else None), mass_kg=w_kg)
     mot = result["mot"]
     job.log.append("building report ...")
     report.build_html_report(mot, sdir / "report.html", gait_speed_m_s=meta.get("speed"),
