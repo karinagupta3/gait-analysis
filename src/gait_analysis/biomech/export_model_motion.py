@@ -153,6 +153,17 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
             fr[bn] = [p.get(0), p.get(1), p.get(2), q.get(1), q.get(2), q.get(3), q.get(0)]
         frames.append(fr)
 
+    # Drop the model ONTO the ground plane. The monocular pipeline outputs hip-centred
+    # coordinates with no ground reference, so the pelvis sat at y=0 and the legs/feet
+    # rendered BELOW the floor grid. Shift every body up by the lowest body height over
+    # the whole clip (preserving vertical motion) so the lowest point rests on y=0.
+    ys = [t[1] for fr in frames for t in fr.values()]
+    if ys:
+        y_off = min(ys)
+        for fr in frames:
+            for t in fr.values():
+                t[1] -= y_off
+
     scene = {"fps": round(float(fps), 2),
              "bodies": [{"name": k, "meshes": v} for k, v in bodies_geo.items()],
              "frames": frames}
