@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 from pathlib import Path
 
@@ -28,6 +29,33 @@ _TRANSLATIONAL_SUFFIXES = ("_tx", "_ty", "_tz")
 _SKIP_MESH = ("capitate", "hamate", "lunate", "metacarpal", "pisiform", "scaphoid",
               "trapezium", "trapezoid", "triquetrum", "index_", "middle_", "ring_",
               "little_", "thumb_", "_distal", "_medial", "_proximal")
+
+
+def _mesh_candidates(fname: str) -> list[str]:
+    """Filenames to try for a referenced mesh. The LaiUhlrich model names leg bones
+    side-FIRST (l_femur.vtp) but Pose2Sim's bundled geometry names them side-LAST
+    (femur_l.vtp, talus_lv.vtp). Try both orderings (and the talus 'v' variant)."""
+    name = Path(fname).name
+    stem = Path(fname).stem
+    out = [name]
+    m = re.match(r"^([lr])_(.+)$", stem)              # l_femur -> femur_l / femur_lv / femur
+    if m:
+        side, bone = m.group(1), m.group(2)
+        out += [f"{bone}_{side}.vtp", f"{bone}_{side}v.vtp", f"{bone}.vtp"]
+    m2 = re.match(r"^(.+?)_([lr])v?$", stem)           # femur_l / talus_lv -> l_femur
+    if m2:
+        bone, side = m2.group(1), m2.group(2)
+        out += [f"{side}_{bone}.vtp"]
+    return out
+
+
+def _resolve_mesh(fname: str, search_dirs):
+    """First existing file among the name candidates across the search dirs, or None."""
+    for cand in _mesh_candidates(fname):
+        for d in search_dirs:
+            if (d / cand).exists():
+                return d / cand
+    return None
 
 
 def _viewer_html(scene: dict) -> str:
@@ -87,7 +115,7 @@ def export_scene(osim_path, mot_path, out_dir, max_frames: int = 150, geometry=N
         xbf = mesh.getFrame().findTransformInBaseFrame()
         p, q = xbf.p(), xbf.R().convertRotationToQuaternion()
         sc = mesh.get_scale_factors()
-        src = next((d / fname for d in search_dirs if (d / fname).exists()), None)
+        src = _resolve_mesh(fname, search_dirs)        # handles l_femur <-> femur_l etc.
         if src is not None:
             dst = geo_out / Path(fname).name
             if src.resolve() != dst.resolve():            # tolerate --geometry pointing at the output dir
