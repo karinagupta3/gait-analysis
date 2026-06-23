@@ -43,6 +43,18 @@ _GAIT_LINKS = [(11, 12), (11, 23), (12, 24), (23, 24),
 # drawn in the wrong place. Arm swing (reduced/asymmetric) is a useful gait flag.
 
 
+def _crown_xy(pt, vis, min_score: float = 0.3):
+    """Estimate a TOP-OF-HEAD point (BlazePose has none — highest landmark is the nose).
+    Extrapolate up the neck→head axis: crown = nose + k·(nose − shoulder_midpoint).
+    Returns normalized (x, y) or None when the needed landmarks are low-confidence."""
+    if vis[0] < min_score or vis[11] < min_score or vis[12] < min_score:
+        return None
+    nose = pt[0]
+    sh = (pt[11] + pt[12]) / 2.0
+    crown = nose + 0.55 * (nose - sh)
+    return crown if np.isfinite(crown).all() else None
+
+
 def kpts2d_from_npz(npz_path, min_score: float = 0.5) -> dict:
     """2D overlay scene: per-frame pixel keypoints + skeleton links + video dimensions.
 
@@ -152,6 +164,11 @@ def render_overlay_video(video_path, npz_path, out_path, min_score: float = 0.5)
                 for p in pts:
                     if p:
                         cv2.circle(frame, p, 5, (90, 220, 90), -1, cv2.LINE_AA)
+                cr = _crown_xy(norm[idx], vis[idx])
+                if cr is not None and pts[0] is not None:           # nose visible
+                    cpx = (int(round(cr[0] * w)), int(round(cr[1] * h)))
+                    cv2.line(frame, pts[0], cpx, (255, 200, 120), 2, cv2.LINE_AA)
+                    cv2.circle(frame, cpx, 5, (90, 220, 90), -1, cv2.LINE_AA)
                 drew += 1
             writer.write(frame)
             idx += 1

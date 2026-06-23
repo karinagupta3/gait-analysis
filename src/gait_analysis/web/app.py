@@ -565,13 +565,20 @@ def _run_screening_subprocess(job, video_path: Path, sdir: Path, meta: dict) -> 
 
 def _sample_process(job, url: str, sdir: Path, meta: dict) -> str:
     """Download a curated sample clip (whitelisted host) then run 2D screening on it."""
+    import shutil as _sh
     import urllib.request
     from urllib.parse import urlparse
     if urlparse(url).hostname not in _ALLOWED_SAMPLE_HOSTS:
         raise RuntimeError("sample URL host not allowed")
     job.log.append("downloading sample clip ...")
     video_path = sdir / "input.mp4"
-    urllib.request.urlretrieve(url, video_path)
+    # Pexels' CDN 403s the default Python-urllib user-agent, so the samples failed with
+    # "error downloading clip". Send a normal browser UA.
+    req = urllib.request.Request(url, headers={"User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
+    with urllib.request.urlopen(req, timeout=120) as resp, open(video_path, "wb") as f:
+        _sh.copyfileobj(resp, f)
     return _run_screening_subprocess(job, video_path, sdir, meta)
 
 
