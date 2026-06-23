@@ -141,41 +141,58 @@ def _run_lstm(model_dir: Path, feature_names: list[str],
     return out
 
 
-def canonical_orient(world: np.ndarray) -> np.ndarray:
-    """Re-express the clip in an anatomical frame: X=anterior, Y=up, Z=subject's right.
+def _horiz_pair(w, vis, ri, li):
+    """Visibility-weighted mean of (w[ri]-w[li]) in the horizontal plane + its weight."""
+    v = w[:, ri, :] - w[:, li, :]
+    v = v.copy(); v[:, 1] = 0.0                          # horizontal only
+    wt = vis[:, ri] * vis[:, li]
+    ok = np.isfinite(v).all(axis=1) & (wt > 0)
+    if not ok.any():
+        return np.zeros(3), 0.0
+    acc = (v[ok] * wt[ok, None]).sum(axis=0)
+    return acc, float(wt[ok].sum())
 
-    The marker-augmentation LSTM (v0.3) was trained almost entirely on
-    forward-facing gait and is NOT rotation-invariant: feed it a subject facing the
-    "wrong" way and it returns a ~180deg-rotated, wildly-listing pelvis (we saw
-    pelvis_rotation ~178deg). `remap_axes` hardcodes anterior=+image-x, which is
-    backwards when the subject walks left. We can't use the hip *trajectory* to find
-    facing because MediaPipe world landmarks are hip-centred (no global translation).
-    So we build the frame from ANATOMY, which is sign-unambiguous because the hip
-    keypoints are left/right-labelled:
-        right (Z) = mean(right_hip - left_hip), projected horizontal, normalised
-        up    (Y) = +Y (gravity)
-        ant   (X) = up x right     (right-handed)
-    Each landmark is then expressed in (X=ant, Y=up, Z=right). This is a rigid
-    rotation about Y — it preserves every joint angle, only fixes the global facing
-    so the LSTM sees a forward-facing subject and the pelvis comes out at ~0deg.
+
+def facing_basis(world: np.ndarray, vis: np.ndarray | None = None):
+    """Robust anatomical basis (A=anterior, U=up, R=subject's right), or None.
+
+    The marker-augmentation LSTM (v0.3) trained on forward-facing gait is NOT
+    rotation-invariant: a "wrong-way" subject comes out ~180deg-rotated and listing.
+    MediaPipe world landmarks are hip-centred (no translation), so facing must come
+    from ANATOMY. We estimate the mediolateral axis (subject's right) from BOTH the
+    hip and shoulder left/right-labelled keypoints, each weighted by MediaPipe
+    visibility -- so when the hips are barely seen (we measured hip-visibility as low
+    as 0.04 on hard clips, which made a hips-only estimate garbage -> pelvis_rotation
+    -117deg) the shoulders carry the estimate. The anterior sign is disambiguated by
+    the feet (toe-heel direction). Returns None when there isn't enough confident
+    data to orient at all (caller then leaves the clip unrotated + flags it).
     """
     w = np.asarray(world, dtype=float)
-    rhip = w[:, _BP["right_hip"], :]
-    lhip = w[:, _BP["left_hip"], :]
-    rvec = rhip - lhip                                  # subject's left->right
-    rvec[:, 1] = 0.0                                    # horizontal component only
-    rvec = rvec[np.isfinite(rvec).all(axis=1)]
-    if len(rvec) < 5:
-        return w
-    R = rvec.mean(axis=0)
-    n = np.linalg.norm(R)
-    if n < 1e-6:
-        return w
-    R = R / n                                           # right (will be +Z)
-    U = np.array([0.0, 1.0, 0.0])                       # up (+Y)
-    A = np.cross(U, R)                                  # anterior (+X), right-handed
+    if vis is None:
+        vis = np.isfinite(w).all(axis=2).astype(float)
+    hv, hw = _horiz_pair(w, vis, _BP["right_hip"], _BP["left_hip"])
+    sv, sw = _horiz_pair(w, vis, _BP["right_shoulder"], _BP["left_shoulder"])
+    R = hv + sv                                          # both already vis-weighted
+    # Confidence gate: need enough well-seen hip/shoulder frames to orient at all.
+    # On very poorly-tracked clips (we measured hip visibility ~0.04) the estimate is
+    # noise -> return None so the caller flags the clip instead of rendering garbage.
+    T = max(1, w.shape[0])
+    if (hw + sw) < 0.15 * T or np.linalg.norm(R) < 1e-6:
+        return None
+    R = R / np.linalg.norm(R)
+    U = np.array([0.0, 1.0, 0.0])
+    A = np.cross(U, R)                                   # anterior, right-handed
     A = A / (np.linalg.norm(A) + 1e-9)
-    # Express every landmark in the orthonormal basis (A, U, R).
+    # NOTE: the sign is already correct because right_hip/right_shoulder are
+    # left/right-LABELLED by MediaPipe, so R points to the subject's true right and
+    # A = up x R is true anterior. (An earlier foot-direction tie-breaker was removed:
+    # MediaPipe's toe/heel landmarks are too noisy and flipped good clips 180deg.)
+    return A, U, R
+
+
+def _apply_basis(world: np.ndarray, basis) -> np.ndarray:
+    A, U, R = basis
+    w = np.asarray(world, dtype=float)
     out = np.empty_like(w)
     out[..., 0] = w[..., 0] * A[0] + w[..., 1] * A[1] + w[..., 2] * A[2]
     out[..., 1] = w[..., 0] * U[0] + w[..., 1] * U[1] + w[..., 2] * U[2]
@@ -183,8 +200,45 @@ def canonical_orient(world: np.ndarray) -> np.ndarray:
     return out
 
 
+def canonical_orient(world: np.ndarray, vis: np.ndarray | None = None) -> np.ndarray:
+    """Re-express the clip in the anatomical frame (X=ant, Y=up, Z=right). No-op if
+    facing can't be determined confidently."""
+    basis = facing_basis(world, vis)
+    return world if basis is None else _apply_basis(world, basis)
+
+
+def smooth_world(world: np.ndarray, fps: float, cutoff_hz: float = 6.0,
+                 order: int = 2) -> np.ndarray:
+    """Zero-lag Butterworth low-pass per landmark/axis (standard gait practice).
+
+    MediaPipe world landmarks are jittery; a 6 Hz low-pass (well above gait's ~3 Hz
+    content) cuts that noise, which lowers the OpenSim marker-tracking residual and
+    steadies the rendered skeleton. Requires gap-filled (finite) input.
+    """
+    w = np.asarray(world, dtype=float)
+    T = w.shape[0]
+    if T < max(10, order * 3) or fps <= 0:
+        return w
+    try:
+        from scipy.signal import butter, filtfilt
+    except Exception:
+        return w
+    wn = min(cutoff_hz / (fps / 2.0), 0.99)
+    if wn <= 0:
+        return w
+    b, a = butter(order, wn)
+    out = w.copy()
+    for j in range(w.shape[1]):
+        for k in range(3):
+            col = w[:, j, k]
+            if np.isfinite(col).all():
+                out[:, j, k] = filtfilt(b, a, col)
+    return out
+
+
 def augment(world: np.ndarray, height_m: float, mass_kg: float,
-            sagittal: bool = False) -> tuple[list[str], np.ndarray]:
+            sagittal: bool = False, basis=None,
+            vis: np.ndarray | None = None) -> tuple[list[str], np.ndarray]:
     """world: (T,33,3) in OpenSim frame (Y up). -> (marker_names, positions (T,M,3)).
 
     Output markers = 43 augmented anatomical "_study" markers + passthrough
@@ -203,7 +257,12 @@ def augment(world: np.ndarray, height_m: float, mass_kg: float,
     world = np.asarray(world, dtype=float)
     if world.ndim != 3 or world.shape[1:] != (33, 3):
         raise ValueError(f"expected (T,33,3) world landmarks, got {world.shape}")
-    world = canonical_orient(world)          # face +X so the LSTM sees forward gait
+    # Face the subject forward so the LSTM sees forward gait. Prefer a basis the
+    # caller computed from pre-gap-fill data + visibility (more robust); else derive.
+    if basis is None:
+        basis = facing_basis(world, vis)
+    if basis is not None:
+        world = _apply_basis(world, basis)
     feats = _build_feature_dict(world)
     hip_root = feats["Hip"]
     aug = _augmenter_dir()

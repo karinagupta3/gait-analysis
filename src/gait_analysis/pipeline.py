@@ -76,14 +76,24 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     # markers written to a .trc the LaiUhlrich2022 model is built around.
     from .biomech import blazepose_to_trc, marker_augmentation as MA
     print("[2/5] Marker augmentation (Stanford LSTM -> anatomical markers) ...")
-    world = blazepose_to_trc.remap_axes(d["world_landmarks"].astype(float))
-    world[d["visibility"].astype(float) < 0.3] = np.nan
-    world = blazepose_to_trc._fill_gaps(world)
+    vis = d["visibility"].astype(float)
+    world_raw = blazepose_to_trc.remap_axes(d["world_landmarks"].astype(float))
+    masked = world_raw.copy()
+    masked[vis < 0.3] = np.nan
+    # Determine facing from the RAW (pre-gap-fill) landmarks + visibility, so the
+    # estimate is confidence-weighted (hips fall back to shoulders on hard clips).
+    basis = MA.facing_basis(masked, vis)
+    conf = float(np.median(vis[:, [11, 12, 23, 24, 25, 26, 27, 28]]))   # shoulders/hips/knees/ankles
+    if basis is None:
+        print("[note] low-confidence pose: facing undetermined; skeleton may be unreliable")
+    world = blazepose_to_trc._fill_gaps(masked)
     fps = float(d["fps"]) or 30.0
+    world = MA.smooth_world(world, fps)                 # Butterworth low-pass (de-jitter)
     height_m = float(height_m) if height_m else MA.estimate_height_m(world)
     mass_kg = float(mass_kg) if mass_kg else 70.0
-    print(f"      subject: height={height_m:.2f} m, mass={mass_kg:.0f} kg")
-    names, pos = MA.augment(world, height_m, mass_kg)
+    print(f"      subject: height={height_m:.2f} m, mass={mass_kg:.0f} kg, "
+          f"tracking confidence={conf:.2f}")
+    names, pos = MA.augment(world, height_m, mass_kg, basis=basis)
     times = np.arange(world.shape[0]) / fps
     trc = blazepose_to_trc.write_trc(
         outdir / "markers.trc", names, pos.astype(np.float32), times)
@@ -102,6 +112,7 @@ def run_quick(video: str | Path, model: str | Path, outdir: str | Path,
     result = report_from_mot(mot, gait_speed_m_s, plot_path=outdir / "joint_angles.png")
     result["mot"] = mot
     result["scaled_model"] = str(scaled_model)
+    result["tracking_confidence"] = round(conf, 2)
 
     # Side-by-side viewer: video+markers (left) synced with the SCALED OpenSim model.
     try:
