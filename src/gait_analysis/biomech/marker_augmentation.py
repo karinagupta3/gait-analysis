@@ -141,16 +141,69 @@ def _run_lstm(model_dir: Path, feature_names: list[str],
     return out
 
 
-def augment(world: np.ndarray, height_m: float, mass_kg: float
-            ) -> tuple[list[str], np.ndarray]:
+def canonical_orient(world: np.ndarray) -> np.ndarray:
+    """Re-express the clip in an anatomical frame: X=anterior, Y=up, Z=subject's right.
+
+    The marker-augmentation LSTM (v0.3) was trained almost entirely on
+    forward-facing gait and is NOT rotation-invariant: feed it a subject facing the
+    "wrong" way and it returns a ~180deg-rotated, wildly-listing pelvis (we saw
+    pelvis_rotation ~178deg). `remap_axes` hardcodes anterior=+image-x, which is
+    backwards when the subject walks left. We can't use the hip *trajectory* to find
+    facing because MediaPipe world landmarks are hip-centred (no global translation).
+    So we build the frame from ANATOMY, which is sign-unambiguous because the hip
+    keypoints are left/right-labelled:
+        right (Z) = mean(right_hip - left_hip), projected horizontal, normalised
+        up    (Y) = +Y (gravity)
+        ant   (X) = up x right     (right-handed)
+    Each landmark is then expressed in (X=ant, Y=up, Z=right). This is a rigid
+    rotation about Y — it preserves every joint angle, only fixes the global facing
+    so the LSTM sees a forward-facing subject and the pelvis comes out at ~0deg.
+    """
+    w = np.asarray(world, dtype=float)
+    rhip = w[:, _BP["right_hip"], :]
+    lhip = w[:, _BP["left_hip"], :]
+    rvec = rhip - lhip                                  # subject's left->right
+    rvec[:, 1] = 0.0                                    # horizontal component only
+    rvec = rvec[np.isfinite(rvec).all(axis=1)]
+    if len(rvec) < 5:
+        return w
+    R = rvec.mean(axis=0)
+    n = np.linalg.norm(R)
+    if n < 1e-6:
+        return w
+    R = R / n                                           # right (will be +Z)
+    U = np.array([0.0, 1.0, 0.0])                       # up (+Y)
+    A = np.cross(U, R)                                  # anterior (+X), right-handed
+    A = A / (np.linalg.norm(A) + 1e-9)
+    # Express every landmark in the orthonormal basis (A, U, R).
+    out = np.empty_like(w)
+    out[..., 0] = w[..., 0] * A[0] + w[..., 1] * A[1] + w[..., 2] * A[2]
+    out[..., 1] = w[..., 0] * U[0] + w[..., 1] * U[1] + w[..., 2] * U[2]
+    out[..., 2] = w[..., 0] * R[0] + w[..., 1] * R[1] + w[..., 2] * R[2]
+    return out
+
+
+def augment(world: np.ndarray, height_m: float, mass_kg: float,
+            sagittal: bool = False) -> tuple[list[str], np.ndarray]:
     """world: (T,33,3) in OpenSim frame (Y up). -> (marker_names, positions (T,M,3)).
 
     Output markers = 43 augmented anatomical "_study" markers + passthrough
     keypoints (Nose + 6 hand markers) the LaiUhlrich2022 IK setup consumes.
+
+    The clip is first re-expressed in an anatomical frame (see canonical_orient) so
+    the LSTM sees a forward-facing subject -- without this the pelvis comes out ~180deg
+    rotated and the whole skeleton looks twisted.
+
+    sagittal=True (off by default) additionally freezes each output marker's
+    mediolateral (Z) coordinate to its time-average. It was meant to suppress noisy
+    monocular depth, but in practice it breaks segment rigidity (collapses knees, pins
+    ankles), so we leave it off -- the anatomical re-framing alone is what fixes the
+    "twisted / wrong" look.
     """
     world = np.asarray(world, dtype=float)
     if world.ndim != 3 or world.shape[1:] != (33, 3):
         raise ValueError(f"expected (T,33,3) world landmarks, got {world.shape}")
+    world = canonical_orient(world)          # face +X so the LSTM sees forward gait
     feats = _build_feature_dict(world)
     hip_root = feats["Hip"]
     aug = _augmenter_dir()
@@ -176,6 +229,10 @@ def augment(world: np.ndarray, height_m: float, mass_kg: float
         [np.column_stack([chunks[m][:, a] for a in range(3)]) for m in range(len(chunks))],
         axis=1,
     )  # (T, M, 3)
+    if sagittal:
+        # Freeze depth (Z = mediolateral) to each marker's time-mean: keep static
+        # body width, drop noisy depth motion -> clean sagittal IK.
+        positions[..., 2] = np.nanmean(positions[..., 2], axis=0, keepdims=True)
     return names, positions
 
 
