@@ -37,20 +37,22 @@ except ImportError:  # pragma: no cover - exercised only without the extra
 # Override with GAIT_STORE_DIR (e.g. /tmp on read-only serverless filesystems).
 DATA_DIR = Path(os.environ.get("GAIT_STORE_DIR", Path(__file__).resolve().parent / "_data"))
 
-# Curated, verified full-body SIDE-VIEW walking clips for one-click testing. Each is
-# downloaded server-side and run through 2D screening. URLs are restricted to the hosts
-# below (SSRF guard) — only these clips can be fetched, nothing arbitrary.
+# Curated, verified full-body SIDE-VIEW walking clips for one-click testing. Hosted in
+# OUR private blob container ("blob") so the server can always fetch them — Pexels'/etc.
+# CDNs 403 datacenter IPs. "url" is the original source, used only for the optional
+# browser "download" link.
+SAMPLE_BLOB_CONTAINER = "gait-samples"
 SAMPLE_VIDEOS = [
-    {"id": "mixkit_man", "label": "Man walking (plaza)",
+    {"id": "mixkit_man", "label": "Man walking (plaza)", "blob": "mixkit_man.mp4",
      "desc": "Full-body side view, ~12 s — cleanest reference clip.",
      "url": "https://assets.mixkit.co/videos/4855/4855-720.mp4"},
-    {"id": "woman_park", "label": "Woman walking (park path)",
+    {"id": "woman_park", "label": "Woman walking (park path)", "blob": "woman_park.mp4",
      "desc": "Full-body side view, ~9 s — tracks cleanly (88% usable).",
      "url": "https://videos.pexels.com/video-files/5535731/5535731-hd_1920_1080_25fps.mp4"},
-    {"id": "woman_wall", "label": "Woman walking (by wall)",
+    {"id": "woman_wall", "label": "Woman walking (by wall)", "blob": "woman_wall.mp4",
      "desc": "Full-body side view, ~8 s.",
      "url": "https://videos.pexels.com/video-files/6414085/6414085-hd_1920_1080_24fps.mp4"},
-    {"id": "woman_poppy", "label": "Woman walking (long, ~40 s)",
+    {"id": "woman_poppy", "label": "Woman walking (long, ~40 s)", "blob": "woman_poppy.mp4",
      "desc": "Full-body side view, many gait cycles — best for a longer trial.",
      "url": "https://videos.pexels.com/video-files/4812188/4812188-hd_1920_1080_30fps.mp4"},
 ]
@@ -563,22 +565,31 @@ def _run_screening_subprocess(job, video_path: Path, sdir: Path, meta: dict) -> 
     return sdir.name
 
 
-def _sample_process(job, url: str, sdir: Path, meta: dict) -> str:
-    """Download a curated sample clip (whitelisted host) then run 2D screening on it."""
-    import shutil as _sh
-    import urllib.request
-    from urllib.parse import urlparse
-    if urlparse(url).hostname not in _ALLOWED_SAMPLE_HOSTS:
-        raise RuntimeError("sample URL host not allowed")
-    job.log.append("downloading sample clip ...")
+def _sample_process(job, sample: dict, sdir: Path, meta: dict) -> str:
+    """Fetch a curated sample clip then run 2D screening on it. Prefer our own private
+    blob (always reachable from the server); fall back to the source URL otherwise."""
     video_path = sdir / "input.mp4"
-    # Pexels' CDN 403s the default Python-urllib user-agent, so the samples failed with
-    # "error downloading clip". Send a normal browser UA.
-    req = urllib.request.Request(url, headers={"User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
-    with urllib.request.urlopen(req, timeout=120) as resp, open(video_path, "wb") as f:
-        _sh.copyfileobj(resp, f)
+    blob = sample.get("blob")
+    if blob and os.environ.get("GAIT_STORAGE_CONNECTION"):
+        job.log.append("loading sample clip ...")
+        from azure.storage.blob import BlobServiceClient
+        bc = (BlobServiceClient.from_connection_string(os.environ["GAIT_STORAGE_CONNECTION"])
+              .get_blob_client(SAMPLE_BLOB_CONTAINER, blob))
+        with open(video_path, "wb") as f:
+            f.write(bc.download_blob().readall())
+    else:
+        import shutil as _sh
+        import urllib.request
+        from urllib.parse import urlparse
+        url = sample.get("url", "")
+        if urlparse(url).hostname not in _ALLOWED_SAMPLE_HOSTS:
+            raise RuntimeError("sample source not available")
+        job.log.append("downloading sample clip ...")
+        req = urllib.request.Request(url, headers={"User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
+        with urllib.request.urlopen(req, timeout=120) as resp, open(video_path, "wb") as f:
+            _sh.copyfileobj(resp, f)
     return _run_screening_subprocess(job, video_path, sdir, meta)
 
 
@@ -803,7 +814,7 @@ def create_app(process_fn=None):
         sdir.mkdir(parents=True, exist_ok=True)
         meta = {"id": sid, "subject": s["label"], "trial": "sample", "speed": None, "mode": "screening"}
         (sdir / "meta.json").write_text(json.dumps({**meta, "state": "processing"}))
-        jid = jm.submit(lambda job: _sample_process(job, s["url"], sdir, meta))
+        jid = jm.submit(lambda job: _sample_process(job, s, sdir, meta))
         return RedirectResponse(f"/job/{jid}", status_code=303)
 
     # --- two-phone (accurate 3D) capture: collect 4 clips, then process ---
