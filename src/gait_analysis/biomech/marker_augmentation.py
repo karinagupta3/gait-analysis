@@ -237,8 +237,7 @@ def smooth_world(world: np.ndarray, fps: float, cutoff_hz: float = 6.0,
 
 
 def augment(world: np.ndarray, height_m: float, mass_kg: float,
-            sagittal: bool = False, basis=None,
-            vis: np.ndarray | None = None) -> tuple[list[str], np.ndarray]:
+            basis=None, vis: np.ndarray | None = None) -> tuple[list[str], np.ndarray]:
     """world: (T,33,3) in OpenSim frame (Y up). -> (marker_names, positions (T,M,3)).
 
     Output markers = 43 augmented anatomical "_study" markers + passthrough
@@ -247,12 +246,6 @@ def augment(world: np.ndarray, height_m: float, mass_kg: float,
     The clip is first re-expressed in an anatomical frame (see canonical_orient) so
     the LSTM sees a forward-facing subject -- without this the pelvis comes out ~180deg
     rotated and the whole skeleton looks twisted.
-
-    sagittal=True (off by default) additionally freezes each output marker's
-    mediolateral (Z) coordinate to its time-average. It was meant to suppress noisy
-    monocular depth, but in practice it breaks segment rigidity (collapses knees, pins
-    ankles), so we leave it off -- the anatomical re-framing alone is what fixes the
-    "twisted / wrong" look.
     """
     world = np.asarray(world, dtype=float)
     if world.ndim != 3 or world.shape[1:] != (33, 3):
@@ -288,10 +281,6 @@ def augment(world: np.ndarray, height_m: float, mass_kg: float,
         [np.column_stack([chunks[m][:, a] for a in range(3)]) for m in range(len(chunks))],
         axis=1,
     )  # (T, M, 3)
-    if sagittal:
-        # Freeze depth (Z = mediolateral) to each marker's time-mean: keep static
-        # body width, drop noisy depth motion -> clean sagittal IK.
-        positions[..., 2] = np.nanmean(positions[..., 2], axis=0, keepdims=True)
     return names, positions
 
 

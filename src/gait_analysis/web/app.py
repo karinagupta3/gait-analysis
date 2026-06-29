@@ -288,15 +288,22 @@ def _process_body() -> str:
         '<input name="weight_kg" type="number" step="0.1" placeholder="e.g. 70"></div></div></div>'
         '<label>Trial label (optional)</label>'
         '<input name="trial" placeholder="auto-named from the movement">'
-        f'<div id="modewrap"><label>Mode</label><select name="mode" id="mode">{mode_opts}</select>'
+        f'<div id="modewrap"><label>Mode</label>'
+        f'<select name="mode" id="mode" onchange="this.dataset.touched=1;updGuide()">{mode_opts}</select>'
         '<div class="note" style="margin-top:6px">3D builds the OpenSim skeleton (video shown in the '
         'corner of the 3D view). 2D is a faster side-view screening report.</div></div>'
         '<label>Video</label><input name="video" type="file" accept="video/*" required>'
         '<button class="btn" type="submit">Upload &amp; process</button></form></div>'
         '<script>'
         'var GUIDE={'
-        'gait:"<b>Walking</b> &mdash; film the <b>side</b> (profile). Whole body in frame, ~3&ndash;4 m '
-        'back, phone at hip height, landscape. Walk 4&ndash;6 strides across the view.",'
+        'gait3d:"<b>Walking (3D)</b> &mdash; phone on a <b>tripod (static)</b>, angled '
+        '<b>~30&deg; from the walking direction</b> (30&ndash;45&deg; off front). Landscape, whole body '
+        'in frame. The person should only be in shot while <b>within ~5 m</b> of the camera; capture '
+        'several gait cycles. <b>Avoid pure front-on or pure side views</b> (both track poorly) and '
+        'anything blocking the body for long. Keep the same angle between visits.",'
+        'gait:"<b>Walking (2D)</b> &mdash; film from the <b>side</b> (profile), since 2D screening reads '
+        'angles in the image plane. Whole body in frame, ~3&ndash;4 m back, phone at hip height, '
+        'landscape. Walk 4&ndash;6 strides across the view.",'
         'squat:"<b>Squat</b> &mdash; film the <b>side</b> (profile) for depth + trunk lean. Whole body '
         'in frame, ~3 m back. Do 3&ndash;5 squats at a steady pace.",'
         'sit_to_stand:"<b>Sit-to-stand</b> &mdash; film the <b>side</b> (profile); keep the whole body '
@@ -308,14 +315,17 @@ def _process_body() -> str:
         'turns, walks back, and sits. Total time is the result (&ge;13.5 s = elevated fall risk)."'
         '};'
         'function updGuide(){var t=document.getElementById("task").value;'
-        'document.getElementById("guide").innerHTML=GUIDE[t]||"";'
         'document.getElementById("stsfields").style.display=(t=="sit_to_stand")?"block":"none";'
         # 3D OpenSim is walking-only (the 3D report is gait kinematics). For walking,
         # DEFAULT to 3D so the OpenSim skeleton shows; for other movements force 2D.
         'var mw=document.getElementById("modewrap"),m=document.getElementById("mode");'
         'if(mw&&m){var has3d=!!m.querySelector(\'option[value="quick"]\');'
-        'if(t=="gait"){mw.style.display="block"; if(has3d)m.value="quick";}'
-        'else{mw.style.display="none"; m.value="screening";}}}'
+        'if(t=="gait"){mw.style.display="block"; if(has3d&&!m.dataset.touched)m.value="quick";}'
+        'else{mw.style.display="none"; m.value="screening";}}'
+        # Guidance depends on BOTH movement and mode: walking-3D wants a 30-45 deg
+        # oblique view (OpenCap), walking-2D + other movements want a side view.
+        'var is3d=(t=="gait"&&m&&m.value=="quick");'
+        'document.getElementById("guide").innerHTML=(t=="gait"?(is3d?GUIDE.gait3d:GUIDE.gait):GUIDE[t])||"";}'
         'updGuide();'
         '</script>')
 
@@ -376,7 +386,7 @@ The clip uploads and processes automatically. Works on a phone or a desktop webc
     <div><label>Height (cm) &mdash; optional, for leg power</label><input id="height_cm" type="number" step="0.1" placeholder="170"></div>
     <div><label>Weight (kg) &mdash; optional, for leg power</label><input id="weight_kg" type="number" step="0.1" placeholder="70"></div></div></div>
   <div class="row2">
-    <div id="modewrap"><label>Mode</label><select id="mode">__MODE_OPTS__</select></div>
+    <div id="modewrap"><label>Mode</label><select id="mode" onchange="this.dataset.touched=1;upd()">__MODE_OPTS__</select></div>
     <div><label>Orientation</label><select id="orient" onchange="initCam()">
       <option value="landscape">Landscape (wide)</option>
       <option value="portrait">Vertical (tall)</option></select></div></div>
@@ -391,7 +401,8 @@ The clip uploads and processes automatically. Works on a phone or a desktop webc
 </div>
 <script>
 var GUIDE={
-gait:'<b>Walking</b> &mdash; film from the <b>side</b> (profile), whole body in frame, ~3&ndash;4 m back, lens at hip height. Walk 4&ndash;6 strides across the view.',
+gait3d:'<b>Walking (3D)</b> &mdash; phone on a <b>tripod (static)</b>, angled <b>~30&deg; from the walking direction</b> (30&ndash;45&deg; off front), landscape, whole body in frame. Person only in shot while <b>within ~5 m</b>; capture several gait cycles. <b>Avoid pure front-on or pure side views</b> and long occlusions; keep the same angle between visits.',
+gait:'<b>Walking (2D)</b> &mdash; film from the <b>side</b> (profile), whole body in frame, ~3&ndash;4 m back, lens at hip height. Walk 4&ndash;6 strides across the view.',
 squat:'<b>Squat</b> &mdash; film from the <b>side</b>, whole body in frame, ~3 m back. Do 3&ndash;5 squats at a steady pace.',
 sit_to_stand:'<b>Sit-to-stand</b> &mdash; film from the <b>side</b>; whole body + the chair in frame, arms across chest (no hands). Do 5 stand&rarr;sit reps, or as many as you can in 30 s. Enter height &amp; weight for leg power.',
 tug:'<b>Timed Up &amp; Go</b> &mdash; film from the <b>side</b>, far enough to keep the subject in frame. Sit, stand on \\'go\\', walk ~3 m, turn, walk back, sit.'
@@ -399,10 +410,12 @@ tug:'<b>Timed Up &amp; Go</b> &mdash; film from the <b>side</b>, far enough to k
 var rec, chunks=[], stream;
 function $(id){return document.getElementById(id);}
 function upd(){var t=$('task').value;
-  $('guide').innerHTML=GUIDE[t]||'';
   $('stsfields').style.display=(t=='sit_to_stand')?'block':'none';
   $('modewrap').style.display=(t=='gait')?'block':'none';
-  var m=$('mode'); if(m&&t=='gait'&&m.querySelector('option[value="quick"]'))m.value='quick';}
+  var m=$('mode'); if(m&&t=='gait'&&!m.dataset.touched&&m.querySelector('option[value="quick"]'))m.value='quick';
+  // walking-3D wants a 30-45 deg oblique view (OpenCap); walking-2D + others want a side view.
+  var is3d=(t=='gait'&&m&&m.value=='quick');
+  $('guide').innerHTML=(t=='gait'?(is3d?GUIDE.gait3d:GUIDE.gait):GUIDE[t])||'';}
 function constraints(){var land=$('orient').value=='landscape';
   var v={width:{ideal:land?1920:1080},height:{ideal:land?1080:1920}};
   var dev=$('cam').value; if(dev) v.deviceId={exact:dev};
