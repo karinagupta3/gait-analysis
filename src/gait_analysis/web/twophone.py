@@ -274,17 +274,15 @@ def assemble_project(code: str) -> Path:
 
     clips = status["clips"]
     for role in ROLES:
-        # Trial clips -> videos/<cam>/ ; calibration clips -> calibration/<cam>/.
+        # Trial clip -> videos/<cam>/.
         trial = clips[_clip_key(role, "trial")]
-        calib = clips[_clip_key(role, "calibration")]
-
         vids = project / "videos" / role
-        cals = project / "calibration" / role
         vids.mkdir(parents=True, exist_ok=True)
-        cals.mkdir(parents=True, exist_ok=True)
-
         _place(Path(trial["path"]), vids / f"{role}_trial.{trial['ext']}")
-        _place(Path(calib["path"]), cals / f"{role}_calibration.{calib['ext']}")
+        # Calibration clip -> the layout Pose2Sim's 'calculate' expects: intrinsics
+        # frames (moving board) + one extrinsics frame (board placed still + shared).
+        calib = clips[_clip_key(role, "calibration")]
+        _build_calibration(Path(calib["path"]), project, role)
 
     # Record where we assembled, for run_session / debugging.
     meta = _load_meta(code)
@@ -292,6 +290,63 @@ def assemble_project(code: str) -> Path:
     meta["assembled"] = _dt.datetime.now().isoformat()
     _save_meta(code, meta)
     return project
+
+
+def _build_calibration(calib_video: Path, project: Path, role: str) -> int:
+    """Turn one camera's calibration clip into Pose2Sim 'calculate' inputs.
+
+    Pose2Sim computes the camera matrices from a printed checkerboard. We split the
+    single calibration clip into the two things it needs:
+      * INTRINSICS (lens): many frames of the board at different angles ->
+        calibration/intrinsics/int_<role>_img/*.jpg (we sample ~1 frame/sec from the
+        moving-board part, i.e. all but the last ~1.5 s).
+      * EXTRINSICS (where the camera is): one frame of the board placed STILL on the
+        floor at the walk start -> calibration/extrinsics/<role>_ext.png (the last
+        frame). Both cameras must see the SAME physical board there -> shared world
+        frame -> their relative positions.
+
+    Capture protocol (see the /capture guide): wave the board around in front of the
+    phone for a few seconds, then lay it flat in the walking area and hold ~2 s.
+    Returns the number of intrinsics frames written.
+    """
+    import cv2
+
+    intr = project / "calibration" / "intrinsics" / f"int_{role}_img"
+    extr = project / "calibration" / "extrinsics"
+    intr.mkdir(parents=True, exist_ok=True)
+    extr.mkdir(parents=True, exist_ok=True)
+
+    cap = cv2.VideoCapture(str(calib_video))
+    try:
+        cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1.0)
+    except Exception:
+        pass
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    step = max(1, int(round(fps)))                 # ~1 frame / second for intrinsics
+    sampled, idx, last = [], 0, None
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        last = frame
+        if idx % step == 0:
+            sampled.append((idx, frame))
+        idx += 1
+    cap.release()
+
+    cutoff = max(0, idx - int(1.5 * fps))          # exclude the static-board tail
+    n = 0
+    for fidx, frame in sampled:
+        if fidx <= cutoff:
+            cv2.imwrite(str(intr / f"{role}_{n:03d}_int.jpg"), frame)
+            n += 1
+    if n == 0:                                      # very short clip -> use every sample
+        for j, (_, frame) in enumerate(sampled):
+            cv2.imwrite(str(intr / f"{role}_{j:03d}_int.jpg"), frame)
+            n += 1
+    if last is not None:
+        cv2.imwrite(str(extr / f"{role}_ext.png"), last)
+    return n
 
 
 def _place(src: Path, dest: Path) -> None:

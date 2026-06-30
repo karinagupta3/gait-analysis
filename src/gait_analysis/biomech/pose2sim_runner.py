@@ -36,7 +36,26 @@ display_detection = false        # headless server -> never pop a GUI window
 synchronization_type = 'sound'   # clap sync; or set up OpenCap-app simultaneous capture
 
 [calibration]
-calibration_type = 'calculate'   # ChArUco board; or 'convert' an existing calibration
+calibration_type = 'calculate'   # compute from a printed checkerboard (vs 'convert' an existing file)
+   [calibration.calculate]
+   save_debug_images = false      # headless server -> no debug image popups
+      [calibration.calculate.intrinsics]
+      overwrite_intrinsics = false
+      intrinsics_extension = 'jpg' # we extract jpg frames from the calibration clip
+      extract_every_N_sec = 1
+      intrinsics_corners_nb = [4, 7]   # INNER corners (a 5x8-square board) -> see capture guide
+      intrinsics_square_size = 25.0    # mm
+      show_detection_intrinsics = false
+      [calibration.calculate.extrinsics]
+      calculate_extrinsics = true
+      extrinsics_method = 'board'  # automated checkerboard detection (no manual point clicking)
+      extrinsics_extension = 'png' # one shared-board frame per camera (camN_ext.png)
+      show_reprojection_error = false
+      moving_cameras = false
+         [calibration.calculate.extrinsics.board]
+         board_position = 'horizontal'   # board lies flat on the floor at the walk start
+         extrinsics_corners_nb = [4, 7]
+         extrinsics_square_size = 25.0   # mm
 
 [triangulation]
 reproj_error_threshold_triangulation = 15
