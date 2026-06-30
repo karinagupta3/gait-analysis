@@ -170,6 +170,11 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
         # using Pose2Sim's bundled 4-camera demo — no upload/footage needed.
         return _run_selftest(sid_dir)
 
+    if mode == "accurate":
+        # 2-phone: tier-1 assembled a Pose2Sim project and uploaded its tree to
+        # gait-in/<sid>/project/. Download it, run the engine, upload the .mot+report.
+        return _run_accurate_job(blob_service, session_id, sid_dir, speed)
+
     # Pull the input video: gait-in/<sid>/video.<ext>
     video = _download_blob(
         blob_service, IN_CONTAINER, f"{session_id}/video.{ext}",
@@ -181,19 +186,8 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
             video, _osim_model(), outdir, gait_speed_m_s=speed,
             height_m=msg.get("height_m"), mass_kg=msg.get("mass_kg"))
         report_src = outdir / "report.html"
-    elif mode == "accurate":
-        # 2-phone: Pose2Sim expects a project directory; the downloaded video is
-        # the seed input. run_accurate triangulates + runs OpenSim IK and returns
-        # the .mot path; copy it into outdir under the canonical name.
-        result = pipeline.run_accurate(sid_dir, gait_speed_m_s=speed)
-        mot = Path(result["mot"])
-        if mot.resolve() != (outdir / "coordinates.mot").resolve():
-            import shutil
-            (outdir).mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(mot, outdir / "coordinates.mot")
-        report_src = outdir / "report.html"
     else:
-        raise ValueError(f"Unknown mode {mode!r} (expected 'quick' or 'accurate').")
+        raise ValueError(f"Unknown mode {mode!r} (expected 'quick', 'accurate', 'selftest').")
 
     # Render a self-contained HTML report from the .mot (the tier-1 contract),
     # so the worker hands back a viewable artifact alongside the raw .mot.
@@ -261,6 +255,52 @@ def _run_selftest(workroot: Path) -> dict:
             "frames": int(data.shape[0]),
             "knee_angle_r_rom": rom("knee_angle_r"),
             "hip_flexion_r_rom": rom("hip_flexion_r")}
+
+
+def _download_prefix(blob_service, container: str, prefix: str, dest: Path) -> int:
+    """Download every blob under <prefix> into dest, preserving sub-paths. Returns count."""
+    dest = Path(dest)
+    cc = blob_service.get_container_client(container)
+    n = 0
+    for b in cc.list_blobs(name_starts_with=prefix):
+        rel = b.name[len(prefix):].lstrip("/")
+        if not rel:
+            continue
+        out = dest / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "wb") as fh:
+            fh.write(cc.get_blob_client(b.name).download_blob().readall())
+        n += 1
+    return n
+
+
+def _run_accurate_job(blob_service, session_id: str, sid_dir: Path, speed) -> dict:
+    """2-phone accurate mode: download the assembled Pose2Sim project from blob, run
+    the engine (calibration -> pose -> triangulation -> marker aug -> OpenSim IK), and
+    upload coordinates.mot + report.html."""
+    import shutil
+
+    from gait_analysis import pipeline
+
+    proj = sid_dir / "project"
+    n = _download_prefix(blob_service, IN_CONTAINER, f"{session_id}/project/", proj)
+    if n == 0:
+        raise RuntimeError(f"no project files under gait-in/{session_id}/project/")
+
+    result = pipeline.run_accurate(proj, gait_speed_m_s=speed)
+    outdir = sid_dir / "out"
+    outdir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(result["mot"]), outdir / "coordinates.mot")
+    try:
+        pipeline.report_from_mot(outdir / "coordinates.mot", gait_speed_m_s=speed,
+                                 html_path=outdir / "report.html")
+    except Exception as exc:        # report is best-effort; the .mot is the contract
+        print(f"[tier-2] accurate report skipped: {exc}")
+
+    uploaded = _upload_outputs(blob_service, session_id, outdir)
+    if "coordinates.mot" not in uploaded:
+        raise RuntimeError("accurate run finished but produced no coordinates.mot")
+    return {"state": "done", "mode": "accurate", "outputs": uploaded}
 
 
 def _upload_dir(blob_service, container: str, local_dir, prefix: str) -> int:

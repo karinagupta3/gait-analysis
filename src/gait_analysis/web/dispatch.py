@@ -190,6 +190,42 @@ def dispatch_job(
     return message
 
 
+def dispatch_project(session_id: str, project_dir: str | Path,
+                     speed: float | None = None) -> int:
+    """Upload an assembled Pose2Sim project tree and enqueue a 2-phone accurate job.
+
+    Uploads every file under `project_dir` to gait-in/<sid>/project/<relpath> (the
+    worker downloads that prefix, runs the engine, and writes gait-out/<sid>/...),
+    then enqueues {"session_id", "mode":"accurate", "speed"}. Returns the file count.
+    """
+    project_dir = Path(project_dir)
+    if not project_dir.is_dir():
+        raise FileNotFoundError(f"project dir not found: {project_dir}")
+
+    blob_service = _blob_service()
+    _ensure_container(blob_service, IN_CONTAINER)
+    _ensure_container(blob_service, OUT_CONTAINER)
+
+    n = 0
+    for p in sorted(project_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(project_dir).as_posix()
+        bc = blob_service.get_blob_client(
+            container=IN_CONTAINER, blob=f"{session_id}/project/{rel}")
+        with open(p, "rb") as fh:
+            bc.upload_blob(fh, overwrite=True)
+        n += 1
+    if n == 0:
+        raise RuntimeError(f"project dir {project_dir} has no files to upload")
+
+    queue = _queue_client()
+    _ensure_queue(queue)
+    queue.send_message(json.dumps(
+        {"session_id": session_id, "mode": "accurate", "speed": speed}))
+    return n
+
+
 def poll_status(session_id: str) -> dict:
     """Return the worker's status for a session, or a synthetic 'queued' state.
 

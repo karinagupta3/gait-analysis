@@ -309,7 +309,8 @@ def _place(src: Path, dest: Path) -> None:
 # --- run the accurate pipeline + build the report ---------------------------
 
 def run_session(code: str, gait_speed_m_s: float | None = None,
-                subject: str | None = None, trial: str | None = None) -> dict:
+                subject: str | None = None, trial: str | None = None,
+                log: list | None = None) -> dict:
     """Assemble + run the accurate (Pose2Sim) pipeline for a session, then report.
 
     Steps:
@@ -334,38 +335,56 @@ def run_session(code: str, gait_speed_m_s: float | None = None,
     code = _safe_code(code)
     project = assemble_project(code)
 
-    # Lazy import the orchestrator (pulls biomech/pose/analysis only when run).
-    from .. import pipeline
-    result = pipeline.run_accurate(project, gait_speed_m_s=gait_speed_m_s)
-    mot = result.get("mot")
+    # Dispatch to the tier-2 WORKER (which has Pose2Sim + OpenSim) rather than running
+    # the engine here — tier-1 is the slim web image with no biomech stack. We upload
+    # the assembled project, enqueue an 'accurate' job, poll status, then fetch the
+    # worker's coordinates.mot + report.html.
+    import time
 
-    report_path = None
-    if mot is not None:
-        # Reuse the existing report builder, same call shape app.py uses, writing into
-        # the staging dir so a web route can serve /twophone/<code>/report.
-        from ..analysis import report
-        sdir = staging_dir(code)
-        title = f"{subject or 'Subject'} : {trial or 'two-phone trial'}"
-        report_path = report.build_html_report(
-            mot, sdir / "report.html", gait_speed_m_s=gait_speed_m_s,
-            subject=subject or None, title=title,
-        )
-        # Persist outcome to meta.json for status/listing.
-        meta = _load_meta(code)
-        meta.update({
-            "mot": str(mot),
-            "report": str(report_path),
-            "subject": subject,
-            "trial": trial,
-            "speed": gait_speed_m_s,
-            "completed": _dt.datetime.now().isoformat(),
-        })
-        _save_meta(code, meta)
+    from . import dispatch
+
+    def _say(m):
+        if log is not None:
+            log.append(m)
+
+    n = dispatch.dispatch_project(code, project, speed=gait_speed_m_s)
+    _say(f"uploaded {n} project files; queued the 2-phone job on the OpenSim worker ...")
+
+    deadline = time.time() + 1800            # 30-min cap (pose + triangulation + IK)
+    last = None
+    while True:
+        st = dispatch.poll_status(code)
+        state = st.get("state")
+        if state != last:
+            _say(f"worker: {state}")
+            last = state
+        if state == "done":
+            break
+        if state == "error":
+            raise RuntimeError("worker: " + st.get("error", "2-phone processing failed"))
+        if time.time() > deadline:
+            raise RuntimeError("2-phone worker timed out (30 min).")
+        time.sleep(3)
+
+    sdir = staging_dir(code)
+    dispatch.fetch_outputs(code, sdir)       # report.html + coordinates.mot
+    mot = sdir / "coordinates.mot"
+    report_path = sdir / "report.html" if (sdir / "report.html").exists() else None
+
+    meta = _load_meta(code)
+    meta.update({
+        "mot": str(mot) if mot.exists() else None,
+        "report": str(report_path) if report_path is not None else None,
+        "subject": subject,
+        "trial": trial,
+        "speed": gait_speed_m_s,
+        "completed": _dt.datetime.now().isoformat(),
+    })
+    _save_meta(code, meta)
 
     return {
         "code": code,
         "project_dir": str(project),
-        "mot": str(mot) if mot is not None else None,
+        "mot": str(mot) if mot.exists() else None,
         "report": str(report_path) if report_path is not None else None,
-        "result": result,
     }

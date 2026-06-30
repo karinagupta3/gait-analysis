@@ -890,19 +890,29 @@ def create_app(process_fn=None):
                     f"<b>{code}</b> still needs: {', '.join(s.get('missing', [])) or 'unknown'}. "
                     f"<a href='/capture'>Back to capture</a></p></section>")
             return HTMLResponse(_shell("Capture", body, "capture"), status_code=400)
-        # The 4 clips are saved. Pose2Sim+OpenSim 3D runs where OpenSim exists (the
-        # tier-2 worker / local dev). On the slim cloud app we stage + explain.
-        if _capabilities()["opensim"]:
+        # The 4 clips are saved. The accurate (Pose2Sim+OpenSim) engine runs on the
+        # tier-2 WORKER; tier-1 dispatches the assembled project to it and polls.
+        # (Local OpenSim is also fine for dev; the worker path covers the cloud app.)
+        if dispatch.storage_configured() or _capabilities()["opensim"]:
             sid = uuid.uuid4().hex[:8]
             sdir = _store_dir() / sid
             sdir.mkdir(parents=True, exist_ok=True)
 
             def _run(job):
-                job.log.append(f"two-phone {code}: Pose2Sim triangulation + OpenSim IK ...")
-                res = twophone.run_session(code, trial=f"two-phone {code}")
+                job.log.append(f"two-phone {code}: assembling + dispatching to the OpenSim worker ...")
+                res = twophone.run_session(code, trial=f"two-phone {code}", log=job.log)
                 rep = res.get("report")
                 if rep and Path(rep).exists():
                     (sdir / "report.html").write_bytes(Path(rep).read_bytes())
+                mot = res.get("mot")
+                if mot and Path(mot).exists():
+                    (sdir / "coordinates.mot").write_bytes(Path(mot).read_bytes())
+                    try:                       # graphable signals, like the quick path
+                        from ..analysis import series_export
+                        series_export.write_series(series_export.from_mot(sdir / "coordinates.mot"),
+                                                   sdir / "series.json")
+                    except Exception as exc:
+                        job.log.append(f"series.json skipped: {exc}")
                 (sdir / "meta.json").write_text(json.dumps(
                     {"id": sid, "subject": "two-phone", "trial": code,
                      "created": _dt.datetime.now().isoformat()}))
