@@ -127,19 +127,34 @@ def run(project_dir: str | Path) -> Path:
 
     p2s = _require_pose2sim()
     cwd = os.getcwd()
+
+    def _stage(name, fn, optional=False):
+        # Log each stage (so the worker logs show progress) and treat Pose2Sim's
+        # sys.exit() as a normal failure -- several stages call sys.exit on a bad
+        # config/data path, which would otherwise silently kill the worker (SystemExit
+        # is NOT an Exception, so the worker's `except Exception` never sees it).
+        print(f"[pose2sim] {name} ...", flush=True)
+        try:
+            fn()
+            print(f"[pose2sim] {name} done", flush=True)
+        except BaseException as exc:               # noqa: BLE001 (incl. SystemExit)
+            if optional:
+                print(f"[pose2sim] {name} skipped ({type(exc).__name__}: {exc})", flush=True)
+                return
+            if isinstance(exc, SystemExit):
+                raise RuntimeError(f"Pose2Sim {name} exited: {exc}") from exc
+            raise
+
     try:
         os.chdir(project_dir)
-        p2s.calibration()
-        p2s.poseEstimation()
-        for optional in ("synchronization", "personAssociation"):
-            try:
-                getattr(p2s, optional)()
-            except Exception as exc:               # best-effort; don't abort the run
-                print(f"[pose2sim] {optional} skipped ({exc})")
-        p2s.triangulation()
-        p2s.filtering()
-        p2s.markerAugmentation()
-        p2s.kinematics()                            # OpenSim scaling + IK
+        _stage("calibration", p2s.calibration)
+        _stage("poseEstimation", p2s.poseEstimation)
+        _stage("synchronization", p2s.synchronization, optional=True)
+        _stage("personAssociation", p2s.personAssociation, optional=True)
+        _stage("triangulation", p2s.triangulation)
+        _stage("filtering", p2s.filtering)
+        _stage("markerAugmentation", p2s.markerAugmentation)
+        _stage("kinematics", p2s.kinematics)        # OpenSim scaling + IK
     finally:
         os.chdir(cwd)
 
