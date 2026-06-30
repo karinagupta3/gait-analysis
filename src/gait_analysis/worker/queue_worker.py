@@ -165,6 +165,11 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
     outdir = sid_dir / "out"
     outdir.mkdir(parents=True, exist_ok=True)
 
+    if mode == "selftest":
+        # Prove the accurate (2-phone) engine runs end-to-end on THIS Linux worker,
+        # using Pose2Sim's bundled 4-camera demo — no upload/footage needed.
+        return _run_selftest(sid_dir)
+
     # Pull the input video: gait-in/<sid>/video.<ext>
     video = _download_blob(
         blob_service, IN_CONTAINER, f"{session_id}/video.{ext}",
@@ -218,6 +223,44 @@ def process_message(blob_service, msg: dict, workroot: Path) -> dict:
             print(f"[tier-2] synced upload skipped: {exc}")
 
     return {"state": "done", "mode": mode, "outputs": uploaded}
+
+
+def _run_selftest(workroot: Path) -> dict:
+    """Run Pose2Sim's bundled 4-camera demo through the accurate engine on this worker.
+
+    Confirms the full chain (multi-camera pose -> triangulation -> marker augmentation
+    -> OpenSim IK) produces joint angles on Linux, and reports a knee/hip ROM sanity
+    check. No blob input needed — the demo ships inside Pose2Sim.
+    """
+    import shutil
+
+    import numpy as np
+    import Pose2Sim as P2S
+
+    from gait_analysis.biomech import pose2sim_runner
+
+    demo = Path(P2S.__file__).resolve().parent / "Demo_SinglePerson"
+    proj = workroot / "selftest_demo"
+    if proj.exists():
+        shutil.rmtree(proj)
+    shutil.copytree(demo, proj)
+
+    mot = pose2sim_runner.run(proj)              # full Pose2Sim pipeline -> .mot
+    lines = mot.read_text().splitlines()
+    i = next(k for k, l in enumerate(lines) if l.lower().startswith("time"))
+    cols = lines[i].split("\t")
+    data = np.array([[float(x) for x in l.split("\t")] for l in lines[i+1:] if l.strip()])
+
+    def rom(name):
+        if name not in cols:
+            return None
+        v = data[:, cols.index(name)]
+        return round(float(np.percentile(v, 97.5) - np.percentile(v, 2.5)), 1)
+
+    return {"state": "done", "mode": "selftest", "outputs": [mot.name],
+            "frames": int(data.shape[0]),
+            "knee_angle_r_rom": rom("knee_angle_r"),
+            "hip_flexion_r_rom": rom("hip_flexion_r")}
 
 
 def _upload_dir(blob_service, container: str, local_dir, prefix: str) -> int:
