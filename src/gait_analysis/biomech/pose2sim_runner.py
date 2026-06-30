@@ -152,7 +152,11 @@ def run(project_dir: str | Path) -> Path:
         _stage("synchronization", p2s.synchronization, optional=True)
         _stage("personAssociation", p2s.personAssociation, optional=True)
         _stage("triangulation", p2s.triangulation)
-        _stage("filtering", p2s.filtering)
+        # NOTE: Pose2Sim's filtering step (butterworth smoothing of the 3D) kills the
+        # worker process uncatchably on the headless server (clean os._exit mid-run,
+        # even with display off), so we SKIP it. It's optional smoothing -- marker
+        # augmentation falls back to the raw (unfiltered) triangulated .trc, and our
+        # own pipeline smooths separately. Revisit if smoothing quality matters.
         _stage("markerAugmentation", p2s.markerAugmentation)
         _stage("kinematics", p2s.kinematics)        # OpenSim scaling + IK
     finally:
