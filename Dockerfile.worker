@@ -71,8 +71,10 @@ RUN curl -L -o /app/models/pose_landmarker_heavy.task \
 # Paths the worker loads (consumed by queue_worker.py / pipeline.run_quick).
 ENV GAIT_OSIM_MODEL=/app/models/LaiUhlrich2022_ga.osim
 ENV GAIT_POSE_TASK_MODEL=/app/models/pose_landmarker_heavy.task
-# Matplotlib needs a writable config dir in the read-only-ish container FS.
+# Matplotlib needs a writable config dir in the read-only-ish container FS, and a
+# headless (non-GUI) backend so Pose2Sim's plotting doesn't crash without a display.
 ENV MPLCONFIGDIR=/tmp/mpl
+ENV MPLBACKEND=Agg
 
 # Drop back to the unprivileged micromamba user for runtime.
 USER mambauser

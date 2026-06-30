@@ -99,6 +99,15 @@ def run(project_dir: str | Path) -> Path:
     if not (project_dir / "Config.toml").exists():
         raise FileNotFoundError(f"No Config.toml in {project_dir}; call prepare_project first.")
 
+    # Pose2Sim's filtering step draws matplotlib plots; on a headless worker (no
+    # display) the default GUI backend raises "TclError: no display". Force Agg.
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    try:
+        import matplotlib
+        matplotlib.use("Agg", force=True)
+    except Exception:
+        pass
+
     try:
         import multiprocessing as _mp
         _mp.set_start_method("fork", force=True)
