@@ -30,6 +30,7 @@ pose_framework = 'rtmlib'        # RTMPose backend (Apache-2.0; no OpenPose)
 pose_model = 'HALPE_26'          # has feet -> better ankle/foot for gait
 mode = 'balanced'
 det_frequency = 1
+display_detection = false        # headless server -> never pop a GUI window
 
 [synchronization]
 synchronization_type = 'sound'   # clap sync; or set up OpenCap-app simultaneous capture
@@ -44,6 +45,7 @@ interpolation = 'cubic'
 
 [filtering]
 type = 'butterworth'
+display_figures = false          # headless server -> never pop a GUI window
 [filtering.butterworth]
 order = 4
 cut_off_frequency = 6
@@ -99,14 +101,23 @@ def run(project_dir: str | Path) -> Path:
     if not (project_dir / "Config.toml").exists():
         raise FileNotFoundError(f"No Config.toml in {project_dir}; call prepare_project first.")
 
-    # Pose2Sim's filtering step draws matplotlib plots; on a headless worker (no
-    # display) the default GUI backend raises "TclError: no display". Force Agg.
+    # Headless worker (no display): Pose2Sim is configured to SHOW figures/detections,
+    # which pops GUI windows and crashes with "TclError: no display". Two guards:
+    # (1) force the Agg matplotlib backend, (2) flip every display_* flag in Config.toml
+    # to false (the real fix -- a backend alone won't stop an explicit plt.show()).
     os.environ.setdefault("MPLBACKEND", "Agg")
     try:
         import matplotlib
         matplotlib.use("Agg", force=True)
     except Exception:
         pass
+    import re as _re
+    _cfg = project_dir / "Config.toml"
+    _txt = _cfg.read_text()
+    for _key in ("display_detection", "display_figures", "show_realtime_results",
+                 "show_plots", "save_vid"):
+        _txt = _re.sub(rf"({_key}\s*=\s*)[Tt]rue", r"\1false", _txt)
+    _cfg.write_text(_txt)
 
     try:
         import multiprocessing as _mp
