@@ -84,21 +84,44 @@ def run(project_dir: str | Path) -> Path:
     """Run the Pose2Sim accurate-mode steps; return the OpenSim IK .mot.
 
     Expects a prepared project with calibration video(s) + the trial videos in place.
+
+    Invocation matches what Pose2Sim actually expects of THIS installed version (proven
+    on its bundled multi-camera demo): each stage reads Config.toml from the current
+    working directory, so we chdir into the project and call the stages with no args
+    (passing a path is version-fragile). We also force the 'fork' multiprocessing start
+    method -- Pose2Sim pools break under macOS 'spawn'; Linux (the worker) already forks.
+    synchronization + personAssociation are best-effort (they're for clap-syncing
+    independently-started clips / multi-person and shouldn't abort an otherwise-good run).
     """
-    project_dir = Path(project_dir)
-    cfg = project_dir / "Config.toml"
-    if not cfg.exists():
+    import os
+
+    project_dir = Path(project_dir).resolve()
+    if not (project_dir / "Config.toml").exists():
         raise FileNotFoundError(f"No Config.toml in {project_dir}; call prepare_project first.")
 
+    try:
+        import multiprocessing as _mp
+        _mp.set_start_method("fork", force=True)
+    except (RuntimeError, ValueError):
+        pass
+
     p2s = _require_pose2sim()
-    p2s.calibration(str(project_dir))
-    p2s.poseEstimation(str(project_dir))
-    p2s.synchronization(str(project_dir))
-    p2s.personAssociation(str(project_dir))
-    p2s.triangulation(str(project_dir))
-    p2s.filtering(str(project_dir))
-    p2s.markerAugmentation(str(project_dir))
-    p2s.kinematics(str(project_dir))   # OpenSim scaling + IK
+    cwd = os.getcwd()
+    try:
+        os.chdir(project_dir)
+        p2s.calibration()
+        p2s.poseEstimation()
+        for optional in ("synchronization", "personAssociation"):
+            try:
+                getattr(p2s, optional)()
+            except Exception as exc:               # best-effort; don't abort the run
+                print(f"[pose2sim] {optional} skipped ({exc})")
+        p2s.triangulation()
+        p2s.filtering()
+        p2s.markerAugmentation()
+        p2s.kinematics()                            # OpenSim scaling + IK
+    finally:
+        os.chdir(cwd)
 
     mots = sorted((project_dir / "kinematics").glob("*.mot"))
     if not mots:
